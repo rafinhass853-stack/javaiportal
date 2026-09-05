@@ -1,16 +1,66 @@
-# React + Vite
+# 🍽️ Ja Vai — Portal do Restaurante
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Sistema de gestão de entregas para restaurantes.  
+Peça motoboys, calcule rotas, gerencie endereços de coleta e acompanhe pedidos.
 
-Currently, two official plugins are available:
+## ✨ Funcionalidades
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Login seguro** com Firebase Authentication
+- **Chamar entregador** com múltiplas entregas por pedido
+- **Mapa interativo** (Leaflet + Routing Machine) com cálculo de distância
+- **Endereços de coleta** salvos por estabelecimento
+- **Meus Dados** — perfil e configurações do restaurante
+- Interface responsiva, mobile-first e visual moderno
 
-## React Compiler
+## 🚀 Como rodar
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+# Instalar dependências
+npm install
 
-## Expanding the ESLint configuration
+# Desenvolvimento
+npm run dev
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+# Build de produção
+npm run build
+
+# Preview do build
+npm run preview
+```
+
+## 🛠️ Stack
+
+- React 19 + Vite
+- Firebase (Auth + Firestore)
+- React Router
+- Leaflet + leaflet-routing-machine
+- Deploy via Firebase Hosting
+
+## 📁 Estrutura
+
+```
+src/
+├── App.jsx          # Rotas e auth guard
+├── Login.jsx        # Tela de login
+├── Menu.jsx         # Layout principal + sidebar
+├── Chamar.jsx       # Formulário de pedidos / entregas
+├── MapaRota.jsx     # Mapa e cálculo de rotas
+├── MeusDados.jsx    # Dados do estabelecimento
+├── firebase.js      # Config + helpers Firestore
+└── index.css        # Design system global
+```
+
+## 🎨 Design
+
+Tema quente (vermelho + amarelo), tipografia limpa, cards com glassmorphism leve e animações suaves.  
+Otimizado para desktop e mobile.
+
+## 📝 Notas
+
+- As credenciais do Firebase estão em `src/firebase.js` (projeto `javaiportal`).
+- Em produção, configure regras de segurança do Firestore adequadas.
+- O histórico de pedidos ainda está como “em breve”.
+
+---
+
+Feito com ❤️ para restaurantes que precisam de entregas rápidas.
