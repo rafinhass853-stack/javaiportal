@@ -1,10 +1,11 @@
 // ============================================
-// MENU.JSX - VERSÃO MELHORADA
+// MENU.JSX - VERSÃO TELA CHEIA - FONTES OTIMIZADAS
 // ============================================
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { auth } from './firebase';
-import Chamar from './Chamar';
+import { auth, onAuthStateChanged } from './firebase';
+import Historico from './Historico';
+import Chamar from './chamar';
 import MeusDados from './MeusDados';
 
 export default function Menu() {
@@ -13,11 +14,12 @@ export default function Menu() {
   const [aba, setAba] = useState('chamar');
   const [usuario, setUsuario] = useState(null);
   const [menuAberto, setMenuAberto] = useState(false);
+  const [nomeExibicao, setNomeExibicao] = useState('Restaurante');
   
-  // Pega o usuário atual
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUsuario(user);
+      setNomeExibicao(user?.displayName || 'Restaurante');
     });
     return unsubscribe;
   }, []);
@@ -26,9 +28,8 @@ export default function Menu() {
   
   const estabelecimentoNome = restauranteSlug 
     ? restauranteSlug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
-    : usuario?.displayName || 'Restaurante';
+    : nomeExibicao;
 
-  // Logout com confirmação
   const handleLogout = async () => {
     if (window.confirm('Tem certeza que deseja sair?')) {
       try {
@@ -40,7 +41,6 @@ export default function Menu() {
     }
   };
 
-  // Fecha menu ao mudar de aba (mobile)
   const handleAbaChange = (aba) => {
     setAba(aba);
     setMenuAberto(false);
@@ -48,22 +48,22 @@ export default function Menu() {
 
   return (
     <div className="menu-container">
-      {/* Fundo com gradiente */}
       <div className="menu-background">
         <div className="bg-blob bg-blob-1"></div>
         <div className="bg-blob bg-blob-2"></div>
         <div className="bg-blob bg-blob-3"></div>
       </div>
 
-      {/* Header */}
       <header className="menu-header">
         <div className="header-left">
           <button 
             className="header-menu-toggle"
             onClick={() => setMenuAberto(!menuAberto)}
-            aria-label="Toggle menu"
+            aria-label={menuAberto ? 'Fechar menu' : 'Abrir menu'}
+            aria-expanded={menuAberto}
+            aria-controls="menu-navegacao"
           >
-            <span className="menu-toggle-icon">☰</span>
+            <span className="menu-toggle-icon" aria-hidden="true">☰</span>
           </button>
           <div className="header-logo">🍽️</div>
           <h1 className="header-title">Ja Vai</h1>
@@ -87,10 +87,8 @@ export default function Menu() {
         </div>
       </header>
 
-      {/* Conteúdo principal */}
       <div className="menu-content">
-        {/* Sidebar */}
-        <aside className={`menu-sidebar ${menuAberto ? 'open' : ''}`}>
+        <aside id="menu-navegacao" className={`menu-sidebar ${menuAberto ? 'open' : ''}`} aria-label="Navegação principal">
           <button
             onClick={() => handleAbaChange('chamar')}
             className={`sidebar-btn ${aba === 'chamar' ? 'active' : ''}`}
@@ -113,11 +111,9 @@ export default function Menu() {
             Histórico
           </button>
 
-          {/* Versão do sistema no mobile */}
           <div className="sidebar-version">v2.0</div>
         </aside>
 
-        {/* Overlay para fechar menu no mobile */}
         {menuAberto && (
           <div 
             className="menu-overlay"
@@ -125,7 +121,6 @@ export default function Menu() {
           />
         )}
 
-        {/* Área de conteúdo */}
         <main className="menu-main">
           {aba === 'chamar' ? (
             <Chamar 
@@ -137,33 +132,31 @@ export default function Menu() {
             <MeusDados 
               estabelecimentoId={estabelecimentoId}
               onDadosSalvos={(dados) => {
-                // Atualiza o nome no header se necessário
-                if (dados?.nome) {
-                  // O header será atualizado na próxima renderização
-                }
+                if (dados?.nome) setNomeExibicao(dados.nome);
               }}
             />
           ) : (
-            <div className="empty-state">
-              <span className="empty-icon">📋</span>
-              <p className="empty-text">Histórico de pedidos em breve</p>
-              <p className="empty-sub">Acompanhe todas as entregas realizadas</p>
-            </div>
+            <Historico estabelecimentoId={estabelecimentoId} />
           )}
         </main>
       </div>
 
       <style>{`
         /* ============================================ */
-        /* MENU - ESTILOS MELHORADOS                   */
+        /* MENU - TELA CHEIA - FONTES OTIMIZADAS       */
         /* ============================================ */
         
         .menu-container {
           min-height: 100vh;
+          min-height: 100dvh;
           width: 100%;
+          display: flex;
+          flex-direction: column;
           position: relative;
           overflow: hidden;
           background: #faf5f0;
+          margin: 0;
+          padding: 0;
         }
 
         /* Fundo */
@@ -230,27 +223,31 @@ export default function Menu() {
           background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(20px);
           -webkit-backdrop-filter: blur(20px);
-          padding: 16px 32px;
+          padding: 12px 28px;
           display: flex;
           justify-content: space-between;
           align-items: center;
           border-bottom: 1px solid rgba(255, 255, 255, 0.3);
-          box-shadow: 0 2px 20px rgba(0, 0, 0, 0.04);
+          box-shadow: 0 1px 12px rgba(0, 0, 0, 0.04);
+          flex-shrink: 0;
+          width: 100%;
+          box-sizing: border-box;
+          min-height: 64px;
         }
 
         .header-left {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 10px;
         }
 
         .header-menu-toggle {
           display: none;
           background: none;
           border: none;
-          font-size: 24px;
+          font-size: 22px;
           cursor: pointer;
-          padding: 4px 8px;
+          padding: 4px 6px;
           color: #424242;
           transition: all 0.3s ease;
         }
@@ -269,15 +266,15 @@ export default function Menu() {
           align-items: center;
           justify-content: center;
           background: linear-gradient(135deg, #FBC02D, #F9A825);
-          width: 40px;
-          height: 40px;
-          border-radius: 12px;
-          font-size: 20px;
-          box-shadow: 0 4px 12px rgba(251, 192, 45, 0.25);
+          width: 36px;
+          height: 36px;
+          border-radius: 10px;
+          font-size: 18px;
+          box-shadow: 0 3px 10px rgba(251, 192, 45, 0.25);
         }
 
         .header-title {
-          font-size: 22px;
+          font-size: 19px;
           margin: 0;
           font-weight: 700;
           background: linear-gradient(135deg, #E53935, #C62828);
@@ -287,11 +284,11 @@ export default function Menu() {
         }
 
         .header-badge {
-          font-size: 13px;
+          font-size: 12px;
           color: #757575;
           background: rgba(229, 57, 53, 0.08);
-          padding: 4px 14px;
-          border-radius: 20px;
+          padding: 3px 12px;
+          border-radius: 16px;
           border: 1px solid rgba(229, 57, 53, 0.1);
           font-weight: 500;
         }
@@ -299,12 +296,12 @@ export default function Menu() {
         .header-right {
           display: flex;
           align-items: center;
-          gap: 16px;
+          gap: 12px;
         }
 
         .header-user {
           color: #757575;
-          font-size: 14px;
+          font-size: 13px;
           font-weight: 500;
           max-width: 150px;
           overflow: hidden;
@@ -316,12 +313,15 @@ export default function Menu() {
           background: transparent;
           border: 1px solid rgba(229, 57, 53, 0.2);
           color: #E53935;
-          padding: 6px 18px;
+          padding: 5px 16px;
           border-radius: 8px;
           cursor: pointer;
-          font-size: 14px;
+          font-size: 13px;
           font-weight: 500;
           transition: all 0.3s ease;
+          height: 34px;
+          display: flex;
+          align-items: center;
         }
 
         .header-logout:hover {
@@ -329,26 +329,26 @@ export default function Menu() {
           color: #fff;
           border-color: #E53935;
           transform: translateY(-1px);
-          box-shadow: 0 4px 12px rgba(229, 57, 53, 0.2);
+          box-shadow: 0 3px 10px rgba(229, 57, 53, 0.2);
         }
 
         /* ============================================ */
-        /* CONTEÚDO PRINCIPAL                           */
+        /* CONTEÚDO PRINCIPAL - TELA CHEIA             */
         /* ============================================ */
         .menu-content {
           position: relative;
           z-index: 1;
           display: flex;
-          padding: 24px;
-          gap: 24px;
-          max-width: 1200px;
-          margin: 0 auto;
+          padding: 20px 28px;
+          gap: 20px;
           width: 100%;
           flex: 1;
-          min-height: calc(100vh - 80px);
+          min-height: calc(100vh - 64px);
+          min-height: calc(100dvh - 64px);
+          box-sizing: border-box;
+          margin: 0;
         }
 
-        /* Overlay para mobile */
         .menu-overlay {
           display: none;
           position: fixed;
@@ -368,10 +368,10 @@ export default function Menu() {
 
         /* Sidebar */
         .menu-sidebar {
-          width: 200px;
+          width: 180px;
           display: flex;
           flex-direction: column;
-          gap: 8px;
+          gap: 6px;
           flex-shrink: 0;
           position: relative;
           z-index: 11;
@@ -379,21 +379,21 @@ export default function Menu() {
 
         .sidebar-version {
           margin-top: auto;
-          padding: 12px 18px;
-          font-size: 11px;
+          padding: 10px 14px;
+          font-size: 10px;
           color: #BDBDBD;
           text-align: center;
           border-top: 1px solid rgba(0, 0, 0, 0.04);
         }
 
         .sidebar-btn {
-          padding: 14px 18px;
+          padding: 11px 16px;
           background: rgba(255, 255, 255, 0.7);
           backdrop-filter: blur(10px);
           -webkit-backdrop-filter: blur(10px);
           border: 1px solid rgba(255, 255, 255, 0.3);
-          border-radius: 12px;
-          font-size: 14px;
+          border-radius: 10px;
+          font-size: 13px;
           font-weight: 500;
           color: #424242;
           cursor: pointer;
@@ -401,85 +401,65 @@ export default function Menu() {
           transition: all 0.3s ease;
           display: flex;
           align-items: center;
-          gap: 10px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+          gap: 8px;
+          box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
+          min-height: 44px;
         }
 
         .sidebar-btn:hover:not(.active) {
           background: rgba(255, 255, 255, 0.9);
           border-color: rgba(229, 57, 53, 0.2);
-          transform: translateX(4px);
+          transform: translateX(3px);
         }
 
         .sidebar-btn.active {
           background: linear-gradient(135deg, #E53935, #C62828);
           color: #fff;
           border-color: #E53935;
-          box-shadow: 0 4px 16px rgba(229, 57, 53, 0.25);
+          box-shadow: 0 3px 12px rgba(229, 57, 53, 0.25);
         }
 
         .btn-icon {
-          font-size: 18px;
+          font-size: 16px;
         }
 
         /* Área principal */
         .menu-main {
           flex: 1;
+          min-width: 0;
           background: rgba(255, 255, 255, 0.7);
           backdrop-filter: blur(10px);
           -webkit-backdrop-filter: blur(10px);
-          border-radius: 16px;
+          border-radius: 14px;
           border: 1px solid rgba(255, 255, 255, 0.3);
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+          box-shadow: 0 2px 16px rgba(0, 0, 0, 0.04);
           min-height: 500px;
           overflow: hidden;
           position: relative;
           z-index: 1;
         }
 
-        /* Estado vazio */
-        .empty-state {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          padding: 80px 20px;
-          min-height: 400px;
-        }
-
-        .empty-icon {
-          font-size: 64px;
-          display: block;
-          margin-bottom: 16px;
-          opacity: 0.6;
-        }
-
-        .empty-text {
-          color: #9E9E9E;
-          font-size: 18px;
-          margin: 0 0 4px 0;
-          font-weight: 500;
-        }
-
-        .empty-sub {
-          color: #BDBDBD;
-          font-size: 14px;
-          margin: 0;
-        }
-
         /* ============================================ */
-        /* RESPONSIVO                                   */
+        /* RESPONSIVO - TELA CHEIA                     */
         /* ============================================ */
         @media (max-width: 1024px) {
           .menu-content {
-            padding: 20px;
-            gap: 20px;
+            padding: 16px 20px;
+            gap: 16px;
           }
         }
 
         @media (max-width: 768px) {
           .menu-header {
-            padding: 12px 16px;
+            padding: 10px 14px;
+            min-height: 56px;
+          }
+
+          .menu-content {
+            padding: 12px;
+            gap: 0;
+            min-height: calc(100vh - 56px);
+            min-height: calc(100dvh - 56px);
           }
 
           .header-menu-toggle {
@@ -487,27 +467,33 @@ export default function Menu() {
           }
 
           .header-right {
-            gap: 8px;
+            gap: 6px;
           }
 
           .header-user {
             font-size: 12px;
-            max-width: 100px;
+            max-width: 90px;
           }
 
           .header-title {
-            font-size: 18px;
+            font-size: 17px;
           }
 
           .header-badge {
-            font-size: 11px;
-            padding: 2px 10px;
+            font-size: 10px;
+            padding: 2px 8px;
           }
 
-          .menu-content {
-            flex-direction: column;
-            padding: 12px;
-            gap: 12px;
+          .header-logo {
+            width: 32px;
+            height: 32px;
+            font-size: 16px;
+          }
+
+          .header-logout {
+            font-size: 12px;
+            padding: 4px 12px;
+            height: 30px;
           }
 
           .menu-overlay {
@@ -518,14 +504,15 @@ export default function Menu() {
             position: fixed;
             top: 0;
             left: -280px;
-            width: 260px;
+            width: 250px;
             height: 100vh;
+            height: 100dvh;
             background: rgba(255, 255, 255, 0.98);
             backdrop-filter: blur(20px);
-            padding: 20px 16px;
-            box-shadow: 4px 0 30px rgba(0, 0, 0, 0.1);
+            padding: 16px 14px;
+            box-shadow: 3px 0 24px rgba(0, 0, 0, 0.1);
             transition: left 0.3s ease;
-            gap: 6px;
+            gap: 4px;
             z-index: 20;
           }
 
@@ -534,11 +521,12 @@ export default function Menu() {
           }
 
           .sidebar-btn {
-            padding: 12px 16px;
-            font-size: 14px;
+            padding: 10px 14px;
+            font-size: 13px;
             background: transparent;
             border: none;
-            border-radius: 10px;
+            border-radius: 8px;
+            min-height: 40px;
           }
 
           .sidebar-btn:hover:not(.active) {
@@ -552,14 +540,13 @@ export default function Menu() {
           }
 
           .sidebar-version {
-            margin-top: auto;
-            padding: 16px 16px 8px;
-            font-size: 11px;
-            color: #BDBDBD;
+            padding: 12px 14px 6px;
+            font-size: 10px;
           }
 
           .menu-main {
-            min-height: 400px;
+            min-height: 350px;
+            border-radius: 12px;
           }
 
           .bg-blob-1 {
@@ -575,63 +562,69 @@ export default function Menu() {
             bottom: -50px;
             left: -50px;
           }
-
-          .empty-state {
-            padding: 60px 16px;
-            min-height: 300px;
-          }
         }
 
         @media (max-width: 480px) {
           .menu-header {
-            padding: 10px 12px;
+            padding: 8px 10px;
+            min-height: 48px;
+          }
+
+          .menu-content {
+            padding: 6px;
+            min-height: calc(100vh - 48px);
+            min-height: calc(100dvh - 48px);
           }
 
           .header-user {
             display: none;
           }
 
-          .header-logout {
-            font-size: 12px;
-            padding: 4px 14px;
+          .header-title {
+            font-size: 15px;
           }
 
-          .menu-content {
-            padding: 8px;
-            gap: 8px;
+          .header-logo {
+            width: 28px;
+            height: 28px;
+            font-size: 14px;
+            border-radius: 8px;
+          }
+
+          .header-logout {
+            font-size: 11px;
+            padding: 3px 10px;
+            height: 26px;
+          }
+
+          .header-badge {
+            font-size: 9px;
+            padding: 1px 6px;
           }
 
           .menu-main {
-            min-height: 300px;
-            border-radius: 12px;
-          }
-
-          .empty-state {
-            padding: 40px 16px;
             min-height: 250px;
-          }
-
-          .empty-icon {
-            font-size: 48px;
-          }
-
-          .empty-text {
-            font-size: 16px;
+            border-radius: 10px;
           }
 
           .menu-sidebar {
-            width: 240px;
-            left: -260px;
-            padding: 16px 12px;
+            width: 220px;
+            left: -240px;
+            padding: 12px 10px;
           }
 
           .sidebar-btn {
-            padding: 10px 14px;
-            font-size: 13px;
+            padding: 8px 12px;
+            font-size: 12px;
+            min-height: 36px;
           }
 
           .btn-icon {
-            font-size: 16px;
+            font-size: 14px;
+          }
+
+          .sidebar-version {
+            font-size: 9px;
           }
         }
       `}</style>

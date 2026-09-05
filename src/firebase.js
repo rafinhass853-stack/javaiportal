@@ -1,319 +1,160 @@
-// src/firebase.js
-import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-import { 
-  getAuth, 
-  signInWithEmailAndPassword,
-  onAuthStateChanged 
-} from "firebase/auth";
-import { 
-  getFirestore, 
-  collection, 
-  addDoc, 
-  serverTimestamp,
-  query,
-  where,
+import { initializeApp } from 'firebase/app';
+import { getAuth, onAuthStateChanged, sendPasswordResetEmail, signInWithEmailAndPassword } from 'firebase/auth';
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
   getDocs,
   orderBy,
-  doc,
+  query,
+  serverTimestamp,
+  setDoc,
   updateDoc,
-  deleteDoc,
-  getDoc,
-  setDoc
-} from "firebase/firestore";
+  where,
+  writeBatch,
+} from 'firebase/firestore';
+import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyAlxlLnnaDLH8m_fakDamP5pz6LDIHCN0U",
-  authDomain: "javaiportal.firebaseapp.com",
-  projectId: "javaiportal",
-  storageBucket: "javaiportal.firebasestorage.app",
-  messagingSenderId: "278906752823",
-  appId: "1:278906752823:web:0d610ce536be966ecd94b2",
-  measurementId: "G-VMQLF77LGR"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyAlxlLnnaDLH8m_fakDamP5pz6LDIHCN0U',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'javaiportal.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'javaiportal',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'javaiportal.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '278906752823',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:278906752823:web:0d610ce536be966ecd94b2',
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || 'G-VMQLF77LGR',
 };
 
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
-
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-// Exporta funções de autenticação
-export { signInWithEmailAndPassword, onAuthStateChanged };
+export { onAuthStateChanged, sendPasswordResetEmail, signInWithEmailAndPassword };
 
-// ============================================
-// FUNÇÕES DE PEDIDOS
-// ============================================
-
-// Função para criar pedido
 export async function criarPedido(dados) {
-  try {
-    const docRef = await addDoc(collection(db, "pedidos"), {
-      ...dados,
-      status: "pendente",
-      dataCriacao: serverTimestamp()
-    });
-    return docRef.id;
-  } catch (error) {
-    console.error("Erro ao criar pedido:", error);
-    throw error;
-  }
+  const docRef = await addDoc(collection(db, 'pedidos'), {
+    ...dados,
+    status: 'pendente',
+    dataCriacao: serverTimestamp(),
+  });
+  return docRef.id;
 }
 
-// Função para buscar pedidos do restaurante
 export async function buscarPedidos(estabelecimentoId) {
+  if (!estabelecimentoId) return [];
+
   try {
-    const q = query(
-      collection(db, "pedidos"),
-      where("estabelecimentoId", "==", estabelecimentoId),
-      orderBy("dataCriacao", "desc")
-    );
+    const pedidosRef = collection(db, 'pedidos');
+    const q = query(pedidosRef, where('estabelecimentoId', '==', estabelecimentoId), orderBy('dataCriacao', 'desc'));
     const snapshot = await getDocs(q);
-    const pedidos = [];
-    snapshot.forEach((doc) => {
-      pedidos.push({ id: doc.id, ...doc.data() });
-    });
-    return pedidos;
+    return snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() }));
   } catch (error) {
-    console.error("Erro ao buscar pedidos:", error);
-    return [];
-  }
-}
-
-// ============================================
-// FUNÇÕES DE ENDEREÇOS DO ESTABELECIMENTO
-// ============================================
-
-/**
- * Buscar todos os endereços de coleta do estabelecimento
- * @param {string} estabelecimentoId - ID do estabelecimento
- * @returns {Promise<Array>} Lista de endereços
- */
-export async function buscarEnderecosEstabelecimento(estabelecimentoId) {
-  try {
-    if (!estabelecimentoId) {
-      console.warn('buscarEnderecosEstabelecimento: estabelecimentoId não fornecido');
+    console.warn('Consulta ordenada indisponível; usando consulta de contingência.', error);
+    try {
+      const snapshot = await getDocs(query(collection(db, 'pedidos'), where('estabelecimentoId', '==', estabelecimentoId)));
+      return snapshot.docs
+        .map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() }))
+        .sort((a, b) => String(b.dataCriacao || '').localeCompare(String(a.dataCriacao || '')));
+    } catch (fallbackError) {
+      console.error('Erro ao buscar pedidos:', fallbackError);
       return [];
     }
-
-    const q = query(
-      collection(db, "estabelecimentos", estabelecimentoId, "enderecos"),
-      orderBy("criadoEm", "asc")
-    );
-    
-    const snapshot = await getDocs(q);
-    const enderecos = [];
-    snapshot.forEach((doc) => {
-      enderecos.push({ 
-        id: doc.id, 
-        ...doc.data() 
-      });
-    });
-    
-    return enderecos;
-  } catch (error) {
-    console.error("Erro ao buscar endereços:", error);
-    return [];
   }
 }
 
-/**
- * Salvar um endereço de coleta (criar ou atualizar)
- * @param {string} estabelecimentoId - ID do estabelecimento
- * @param {Object} endereco - Dados do endereço
- * @param {string} endereco.nome - Nome do endereço (ex: "Matriz", "Filial Centro")
- * @param {string} endereco.uf - UF (ex: "SP")
- * @param {string} endereco.cidade - Nome da cidade
- * @param {string} endereco.bairro - Bairro
- * @param {string} endereco.logradouro - Rua, Avenida, etc.
- * @param {string} endereco.numero - Número
- * @param {string} endereco.complemento - Complemento (opcional)
- * @param {string} endereco.id - ID do endereço (para atualização)
- * @returns {Promise<Object>} Endereço salvo com ID
- */
+export async function buscarEnderecosEstabelecimento(estabelecimentoId) {
+  if (!estabelecimentoId) return [];
+
+  const enderecosRef = collection(db, 'estabelecimentos', estabelecimentoId, 'enderecos');
+  try {
+    const snapshot = await getDocs(query(enderecosRef, orderBy('criadoEm', 'asc')));
+    return snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() }));
+  } catch (error) {
+    console.warn('Consulta ordenada de endereços indisponível; usando consulta de contingência.', error);
+    const snapshot = await getDocs(enderecosRef);
+    return snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() }));
+  }
+}
+
 export async function salvarEnderecoEstabelecimento(estabelecimentoId, endereco) {
-  try {
-    if (!estabelecimentoId) {
-      throw new Error('estabelecimentoId não fornecido');
-    }
-
-    if (!endereco) {
-      throw new Error('Dados do endereço não fornecidos');
-    }
-
-    // Validações básicas
-    if (!endereco.logradouro || !endereco.numero || !endereco.cidade || !endereco.uf) {
-      throw new Error('Campos obrigatórios: logradouro, numero, cidade, uf');
-    }
-
-    // Monta o endereço completo
-    const enderecoCompleto = `${endereco.logradouro}, ${endereco.numero}${endereco.complemento ? ` - ${endereco.complemento}` : ''}${endereco.bairro ? `, ${endereco.bairro}` : ''}, ${endereco.cidade} - ${endereco.uf}`;
-
-    const dados = {
-      nome: endereco.nome || 'Endereço Principal',
-      uf: endereco.uf.toUpperCase(),
-      cidade: endereco.cidade,
-      bairro: endereco.bairro || '',
-      logradouro: endereco.logradouro,
-      numero: endereco.numero,
-      complemento: endereco.complemento || '',
-      enderecoCompleto: enderecoCompleto,
-      atualizadoEm: serverTimestamp()
-    };
-
-    const enderecosRef = collection(db, "estabelecimentos", estabelecimentoId, "enderecos");
-
-    if (endereco.id) {
-      // Atualizar endereço existente
-      const docRef = doc(db, "estabelecimentos", estabelecimentoId, "enderecos", endereco.id);
-      await updateDoc(docRef, dados);
-      
-      // Buscar o documento atualizado
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        return { id: docSnap.id, ...docSnap.data() };
-      } else {
-        throw new Error('Endereço não encontrado após atualização');
-      }
-    } else {
-      // Criar novo endereço
-      dados.criadoEm = serverTimestamp();
-      const docRef = await addDoc(enderecosRef, dados);
-      
-      // Buscar o documento criado
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        return { id: docSnap.id, ...docSnap.data() };
-      } else {
-        return { id: docRef.id, ...dados };
-      }
-    }
-  } catch (error) {
-    console.error("Erro ao salvar endereço:", error);
-    throw error;
+  if (!estabelecimentoId) throw new Error('estabelecimentoId não fornecido');
+  if (!endereco) throw new Error('Dados do endereço não fornecidos');
+  if (!endereco.logradouro || !endereco.numero || !endereco.cidade || !endereco.uf) {
+    throw new Error('Campos obrigatórios: logradouro, numero, cidade, uf');
   }
+
+  const ufNormalizada = endereco.uf.trim().toUpperCase();
+  const enderecoCompleto = `${endereco.logradouro.trim()}, ${endereco.numero.trim()}${endereco.complemento ? ` - ${endereco.complemento.trim()}` : ''}${endereco.bairro ? `, ${endereco.bairro.trim()}` : ''}, ${endereco.cidade.trim()} - ${ufNormalizada}`;
+  const dados = {
+    nome: endereco.nome?.trim() || 'Endereço Principal',
+    uf: ufNormalizada,
+    cidade: endereco.cidade.trim(),
+    bairro: endereco.bairro?.trim() || '',
+    logradouro: endereco.logradouro.trim(),
+    numero: endereco.numero.trim(),
+    complemento: endereco.complemento?.trim() || '',
+    enderecoCompleto,
+    atualizadoEm: serverTimestamp(),
+  };
+
+  const enderecosRef = collection(db, 'estabelecimentos', estabelecimentoId, 'enderecos');
+  const docRef = endereco.id
+    ? doc(db, 'estabelecimentos', estabelecimentoId, 'enderecos', endereco.id)
+    : await addDoc(enderecosRef, { ...dados, criadoEm: serverTimestamp() });
+
+  if (endereco.id) await updateDoc(docRef, dados);
+  const snapshot = await getDoc(docRef);
+  return snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : { id: docRef.id, ...dados };
 }
 
-/**
- * Deletar um endereço de coleta
- * @param {string} estabelecimentoId - ID do estabelecimento
- * @param {string} enderecoId - ID do endereço
- * @returns {Promise<void>}
- */
 export async function deletarEnderecoEstabelecimento(estabelecimentoId, enderecoId) {
-  try {
-    if (!estabelecimentoId || !enderecoId) {
-      throw new Error('estabelecimentoId e enderecoId são obrigatórios');
-    }
-
-    const docRef = doc(db, "estabelecimentos", estabelecimentoId, "enderecos", enderecoId);
-    await deleteDoc(docRef);
-  } catch (error) {
-    console.error("Erro ao deletar endereço:", error);
-    throw error;
-  }
+  if (!estabelecimentoId || !enderecoId) throw new Error('estabelecimentoId e enderecoId são obrigatórios');
+  await deleteDoc(doc(db, 'estabelecimentos', estabelecimentoId, 'enderecos', enderecoId));
 }
 
-/**
- * Buscar um endereço específico
- * @param {string} estabelecimentoId - ID do estabelecimento
- * @param {string} enderecoId - ID do endereço
- * @returns {Promise<Object|null>} Endereço encontrado ou null
- */
 export async function buscarEnderecoPorId(estabelecimentoId, enderecoId) {
-  try {
-    if (!estabelecimentoId || !enderecoId) {
-      return null;
-    }
-
-    const docRef = doc(db, "estabelecimentos", estabelecimentoId, "enderecos", enderecoId);
-    const docSnap = await getDoc(docRef);
-    
-    if (docSnap.exists()) {
-      return { id: docSnap.id, ...docSnap.data() };
-    }
-    return null;
-  } catch (error) {
-    console.error("Erro ao buscar endereço:", error);
-    return null;
-  }
+  if (!estabelecimentoId || !enderecoId) return null;
+  const snapshot = await getDoc(doc(db, 'estabelecimentos', estabelecimentoId, 'enderecos', enderecoId));
+  return snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null;
 }
 
-/**
- * Definir um endereço como padrão
- * @param {string} estabelecimentoId - ID do estabelecimento
- * @param {string} enderecoId - ID do endereço
- * @returns {Promise<void>}
- */
 export async function definirEnderecoPadrao(estabelecimentoId, enderecoId) {
-  try {
-    if (!estabelecimentoId || !enderecoId) {
-      throw new Error('estabelecimentoId e enderecoId são obrigatórios');
-    }
+  if (!estabelecimentoId || !enderecoId) throw new Error('estabelecimentoId e enderecoId são obrigatórios');
+  const enderecos = await buscarEnderecosEstabelecimento(estabelecimentoId);
+  const batch = writeBatch(db);
 
-    // Busca todos os endereços
-    const enderecos = await buscarEnderecosEstabelecimento(estabelecimentoId);
-    
-    // Remove o padrão de todos
-    const batch = db.batch();
-    
-    for (const endereco of enderecos) {
-      const docRef = doc(db, "estabelecimentos", estabelecimentoId, "enderecos", endereco.id);
-      batch.update(docRef, { isPadrao: false });
-    }
-    
-    // Define o novo padrão
-    const docRef = doc(db, "estabelecimentos", estabelecimentoId, "enderecos", enderecoId);
-    batch.update(docRef, { isPadrao: true });
-    
-    await batch.commit();
-  } catch (error) {
-    console.error("Erro ao definir endereço padrão:", error);
-    throw error;
-  }
+  enderecos.forEach((endereco) => {
+    batch.update(doc(db, 'estabelecimentos', estabelecimentoId, 'enderecos', endereco.id), {
+      isPadrao: endereco.id === enderecoId,
+    });
+  });
+
+  await batch.commit();
 }
 
-// ============================================
-// FUNÇÕES AUXILIARES DE VALIDAÇÃO
-// ============================================
-
-/**
- * Validar se um endereço está completo
- * @param {Object} endereco - Endereço a ser validado
- * @returns {boolean} True se completo
- */
 export function validarEndereco(endereco) {
-  return !!(endereco && 
-    endereco.logradouro && 
-    endereco.numero && 
-    endereco.cidade && 
-    endereco.uf);
+  return Boolean(endereco?.logradouro?.trim() && endereco?.numero?.trim() && endereco?.cidade?.trim() && endereco?.uf?.trim());
 }
 
-/**
- * Formatar endereço para exibição
- * @param {Object} endereco - Dados do endereço
- * @returns {string} Endereço formatado
- */
 export function formatarEndereco(endereco) {
   if (!endereco) return '';
-  
-  const partes = [];
-  
-  if (endereco.logradouro) partes.push(endereco.logradouro);
-  if (endereco.numero) partes.push(endereco.numero);
-  if (endereco.complemento) partes.push(`- ${endereco.complemento}`);
-  if (endereco.bairro) partes.push(endereco.bairro);
-  if (endereco.cidade) partes.push(endereco.cidade);
-  if (endereco.uf) partes.push(`- ${endereco.uf}`);
-  
-  return partes.join(' ');
+  return [
+    endereco.logradouro,
+    endereco.numero,
+    endereco.complemento && `- ${endereco.complemento}`,
+    endereco.bairro,
+    endereco.cidade,
+    endereco.uf && `- ${endereco.uf}`,
+  ].filter(Boolean).join(' ');
 }
 
 export default {
   auth,
   db,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   onAuthStateChanged,
   criarPedido,
   buscarPedidos,
@@ -323,5 +164,6 @@ export default {
   buscarEnderecoPorId,
   definirEnderecoPadrao,
   validarEndereco,
-  formatarEndereco
+  formatarEndereco,
+  setDoc,
 };

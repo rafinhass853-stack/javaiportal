@@ -1,281 +1,329 @@
 // ============================================
-// MEUSDADOS.JSX - VERSÃO MELHORADA
+// MEUSDADOS.JSX - FONTES OTIMIZADAS PARA ZOOM 100%
 // ============================================
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { auth, db } from './firebase';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { db } from './firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { MapContainer, TileLayer, Marker, Popup, useMap, LayersControl } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-
-// Correção dos ícones padrão do Leaflet
-import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
-import markerIcon from 'leaflet/dist/images/marker-icon.png';
-import markerShadow from 'leaflet/dist/images/marker-shadow.png';
-
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconUrl: markerIcon,
-  iconRetinaUrl: markerIcon2x,
-  shadowUrl: markerShadow,
-});
-
-const { BaseLayer } = LayersControl;
+import { LoadScript, GoogleMap, Marker, InfoWindow } from '@react-google-maps/api';
 
 // ============================================
-// COMPONENTE: MapaHibrido
+// CONSTANTES
 // ============================================
-function MapaHibrido() {
-  return (
-    <>
-      <TileLayer
-        attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
-        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-      />
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        opacity={0.5}
-        zIndex={1000}
-      />
-    </>
-  );
-}
+const GOOGLE_MAPS_API_KEY = 'AIzaSyBQkWPT9Suz_x-jqM_FBMFdndTvGcrwjBE';
+
+const ESTADOS_BRASIL = [
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 
+  'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 
+  'SP', 'SE', 'TO'
+];
 
 // ============================================
-// COMPONENTE: SearchControl
+// ESTILOS DO MAPA
 // ============================================
-function SearchControl({ onEnderecoEncontrado, onCarregando, onErro }) {
-  const map = useMap();
-  const [termo, setTermo] = useState('');
-  const [buscando, setBuscando] = useState(false);
-  const [resultados, setResultados] = useState([]);
-  const [mostrarResultados, setMostrarResultados] = useState(false);
-  const inputRef = useRef(null);
-  const resultsRef = useRef(null);
-  const timeoutRef = useRef(null);
+const mapContainerStyle = {
+  width: '100%',
+  height: '100%',
+};
 
-  const buscarEnderecos = async (query) => {
-    if (!query || query.trim().length < 3) {
-      setResultados([]);
-      setMostrarResultados(false);
-      return;
+// ============================================
+// COMPONENTE: GoogleMap (API tradicional)
+// ============================================
+function GoogleMapComponent({ 
+  center, 
+  zoom, 
+  markerPosition, 
+  onMarkerDragEnd,
+  onPlaceSelect,
+  nomeEstabelecimento,
+  endereco,
+  setMapInstance 
+}) {
+  const [map, setMap] = useState(null);
+  const [infoWindowOpen, setInfoWindowOpen] = useState(true);
+  const searchInputRef = useRef(null);
+
+  const onMapLoad = useCallback((mapInstance) => {
+    setMap(mapInstance);
+    if (setMapInstance) {
+      setMapInstance(mapInstance);
     }
 
-    setBuscando(true);
-    if (onCarregando) onCarregando(true);
-
-    try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&countrycodes=BR&addressdetails=1&accept-language=pt-BR`,
-        { headers: { 'User-Agent': 'JaVaiApp/1.0' } }
-      );
-
-      if (!response.ok) throw new Error('Erro na API');
-
-      const data = await response.json();
+    if (searchInputRef.current && window.google) {
+      const searchBox = new window.google.maps.places.SearchBox(searchInputRef.current);
       
-      if (data && data.length > 0) {
-        const resultadosFormatados = data.map(item => ({
-          lat: parseFloat(item.lat),
-          lon: parseFloat(item.lon),
-          displayName: item.display_name,
-          endereco: item.display_name.split(',')[0].trim(),
-          cidade: item.address?.city || item.address?.town || item.address?.village || '',
-          uf: item.address?.state || '',
-          bairro: item.address?.suburb || item.address?.neighbourhood || '',
-          logradouro: item.address?.road || item.address?.street || '',
-          numero: item.address?.house_number || '',
-          cep: item.address?.postcode || ''
-        }));
-        setResultados(resultadosFormatados);
-        setMostrarResultados(true);
-        if (onErro) onErro(false);
-      } else {
-        setResultados([]);
-        setMostrarResultados(false);
-        if (onErro) onErro(true);
-      }
-    } catch (error) {
-      console.error('Erro ao buscar endereço:', error);
-      setResultados([]);
-      setMostrarResultados(false);
-      if (onErro) onErro(true);
-    } finally {
-      setBuscando(false);
-      if (onCarregando) onCarregando(false);
-    }
-  };
-
-  // Debounce da busca
-  useEffect(() => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    
-    timeoutRef.current = setTimeout(() => {
-      if (termo.trim().length >= 3) {
-        buscarEnderecos(termo);
-      } else {
-        setResultados([]);
-        setMostrarResultados(false);
-      }
-    }, 500);
-
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    };
-  }, [termo]);
-
-  // Fechar resultados ao clicar fora
-  useEffect(() => {
-    function handleClickOutside(event) {
-      if (resultsRef.current && !resultsRef.current.contains(event.target) &&
-          inputRef.current && !inputRef.current.contains(event.target)) {
-        setMostrarResultados(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Selecionar um resultado
-  const selecionarResultado = (resultado) => {
-    const coords = [resultado.lat, resultado.lon];
-    map.setView(coords, 17);
-    
-    if (onEnderecoEncontrado) {
-      onEnderecoEncontrado({
-        enderecoCompleto: resultado.displayName,
-        cidade: resultado.cidade || '',
-        uf: resultado.uf || '',
-        bairro: resultado.bairro || '',
-        logradouro: resultado.logradouro || resultado.endereco || '',
-        numero: resultado.numero || '',
-        cep: resultado.cep || '',
-        lat: resultado.lat,
-        lon: resultado.lon,
-        coords
+      searchBox.addListener('places_changed', () => {
+        const places = searchBox.getPlaces();
+        if (places && places.length > 0) {
+          const place = places[0];
+          if (place.geometry) {
+            const location = place.geometry.location;
+            
+            mapInstance.panTo(location);
+            mapInstance.setZoom(17);
+            
+            if (onPlaceSelect) {
+              onPlaceSelect({
+                lat: location.lat(),
+                lng: location.lng(),
+                formattedAddress: place.formatted_address,
+                displayName: place.name,
+              });
+            }
+            
+            setInfoWindowOpen(true);
+          }
+        }
       });
     }
+  }, [setMapInstance, onPlaceSelect]);
 
-    setTermo('');
-    setResultados([]);
-    setMostrarResultados(false);
+  useEffect(() => {
+    if (map && center) {
+      map.panTo({ lat: center[0], lng: center[1] });
+      if (zoom) {
+        map.setZoom(zoom);
+      }
+    }
+  }, [map, center, zoom]);
+
+  useEffect(() => {
+    if (markerPosition && map) {
+      map.panTo({ lat: markerPosition[0], lng: markerPosition[1] });
+      map.setZoom(17);
+      setInfoWindowOpen(true);
+    }
+  }, [markerPosition, map]);
+
+  const handleMarkerDragEnd = useCallback((event) => {
+    const position = event.latLng;
+    const coords = [position.lat(), position.lng()];
+    if (onMarkerDragEnd) {
+      onMarkerDragEnd(coords);
+    }
+    setInfoWindowOpen(true);
+  }, [onMarkerDragEnd]);
+
+  const mapOptions = {
+    disableDefaultUI: false,
+    zoomControl: true,
+    zoomControlOptions: {
+      position: window.google?.maps?.ControlPosition?.RIGHT_CENTER || 1,
+    },
+    mapTypeControl: true,
+    mapTypeControlOptions: {
+      position: window.google?.maps?.ControlPosition?.TOP_RIGHT || 1,
+      style: window.google?.maps?.MapTypeControlStyle?.HORIZONTAL_BAR || 0,
+      mapTypeIds: ['roadmap', 'satellite', 'hybrid', 'terrain'],
+    },
+    streetViewControl: true,
+    streetViewControlOptions: {
+      position: window.google?.maps?.ControlPosition?.RIGHT_BOTTOM || 1,
+    },
+    fullscreenControl: true,
+    fullscreenControlOptions: {
+      position: window.google?.maps?.ControlPosition?.RIGHT_BOTTOM || 1,
+    },
+    mapTypeId: 'hybrid',
   };
 
   return (
-    <div className="search-control-container">
-      <div className="search-input-wrapper">
-        <span className="search-icon">🔍</span>
+    <div className="mapa-wrapper">
+      <div className="search-box-container">
         <input
-          ref={inputRef}
+          ref={searchInputRef}
           type="text"
-          value={termo}
-          onChange={(e) => setTermo(e.target.value)}
-          placeholder="Digite o endereço do seu estabelecimento..."
-          className="search-input"
-          onFocus={() => {
-            if (resultados.length > 0) setMostrarResultados(true);
-          }}
+          placeholder="Pesquisar no mapa"
+          className="search-box-input"
         />
-        {buscando && <span className="search-loading">⏳</span>}
+        <button className="search-box-button">
+          <svg viewBox="0 0 24 24" width="18" height="18">
+            <path fill="#5f6368" d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+          </svg>
+        </button>
       </div>
 
-      {mostrarResultados && resultados.length > 0 && (
-        <div ref={resultsRef} className="search-results">
-          {resultados.map((item, index) => (
-            <div
-              key={index}
-              className="search-result-item"
-              onClick={() => selecionarResultado(item)}
-            >
-              <div className="search-result-main">
-                <span className="search-result-icon">📍</span>
-                <span className="search-result-nome">{item.endereco}</span>
+      <GoogleMap
+        mapContainerStyle={mapContainerStyle}
+        center={center ? { lat: center[0], lng: center[1] } : { lat: -14.235, lng: -51.925 }}
+        zoom={zoom || 4}
+        options={mapOptions}
+        onLoad={onMapLoad}
+      >
+        {markerPosition && (
+          <Marker
+            position={{ lat: markerPosition[0], lng: markerPosition[1] }}
+            draggable={true}
+            onDragEnd={handleMarkerDragEnd}
+            onClick={() => setInfoWindowOpen(!infoWindowOpen)}
+          />
+        )}
+
+        {markerPosition && infoWindowOpen && (
+          <InfoWindow
+            position={{ lat: markerPosition[0], lng: markerPosition[1] }}
+            onCloseClick={() => setInfoWindowOpen(false)}
+          >
+            <div className="info-window-content">
+              <div className="info-window-title">
+                {nomeEstabelecimento || '📍 Local selecionado'}
               </div>
-              <div className="search-result-detalhe">
-                {item.cidade}{item.uf ? ` - ${item.uf}` : ''}
-                {item.bairro ? `, ${item.bairro}` : ''}
+              <div className="info-window-address">
+                {endereco || 'Arraste o marcador para ajustar'}
+              </div>
+              <div className="info-window-hint">
+                🖱️ Arraste o marcador para ajustar
               </div>
             </div>
-          ))}
-        </div>
-      )}
-
-      {mostrarResultados && resultados.length === 0 && termo.trim().length >= 3 && !buscando && (
-        <div className="search-results">
-          <div className="search-result-empty">
-            <span>🔍</span>
-            <p>Nenhum endereço encontrado</p>
-            <p className="search-result-hint">Tente buscar por cidade, rua ou CEP</p>
-          </div>
-        </div>
-      )}
+          </InfoWindow>
+        )}
+      </GoogleMap>
     </div>
   );
-}
-
-// ============================================
-// COMPONENTE: CenterMap
-// ============================================
-function CenterMap({ coordenadas }) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (coordenadas) {
-      map.setView(coordenadas, 17);
-    }
-  }, [coordenadas, map]);
-
-  return null;
 }
 
 // ============================================
 // COMPONENTE PRINCIPAL: MeusDados
 // ============================================
 export default function MeusDados({ estabelecimentoId, onDadosSalvos }) {
+  const [isScriptLoaded, setIsScriptLoaded] = useState(false);
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [mensagem, setMensagem] = useState('');
+  const [mensagemTipo, setMensagemTipo] = useState('sucesso');
   const [mensagemErro, setMensagemErro] = useState('');
-  const [mensagemTipo, setMensagemTipo] = useState('');
+  const [mapInstance, setMapInstance] = useState(null);
+  const [abaAtiva, setAbaAtiva] = useState('formulario');
 
   // Estados do Formulário
   const [nomeEstabelecimento, setNomeEstabelecimento] = useState('');
   const [telefone, setTelefone] = useState('');
-  const [email, setEmail] = useState('');
   const [uf, setUf] = useState('');
   const [cidade, setCidade] = useState('');
+  const [cidadesFiltradas, setCidadesFiltradas] = useState([]);
+  const [mostrarSugestoesCidade, setMostrarSugestoesCidade] = useState(false);
   const [bairro, setBairro] = useState('');
   const [logradouro, setLogradouro] = useState('');
   const [numero, setNumero] = useState('');
   const [complemento, setComplemento] = useState('');
   const [cep, setCep] = useState('');
-  const [enderecoCompleto, setEnderecoCompleto] = useState('');
-  const [coordenadasMapa, setCoordenadasMapa] = useState(null);
-  const [carregandoMapa, setCarregandoMapa] = useState(false);
-  const [erroMapa, setErroMapa] = useState(false);
-  const [dadosIniciais, setDadosIniciais] = useState(null);
+
+  // Estados do Mapa
+  const [coordenadasSalvas, setCoordenadasSalvas] = useState(null);
+  const [coordenadasAtuais, setCoordenadasAtuais] = useState(null);
+  const [zoomMapa, setZoomMapa] = useState(4);
+  const [centroMapa, setCentroMapa] = useState([-14.235, -51.925]);
+  const [buscandoCep, setBuscandoCep] = useState(false);
+
+  const cidadeInputRef = useRef(null);
+  const cidadeResultsRef = useRef(null);
+  const cepTimeoutRef = useRef(null);
 
   // ============================================
-  // CARREGAR DADOS
+  // BUSCAR CEP (ViaCEP)
   // ============================================
-  useEffect(() => {
-    if (estabelecimentoId) {
-      carregarDados();
+  const buscarCep = async (cepInput) => {
+    const cepLimpo = cepInput.replace(/\D/g, '');
+    
+    if (cepLimpo.length !== 8) {
+      return;
     }
-  }, [estabelecimentoId]);
 
+    setBuscandoCep(true);
+    setMensagem('');
+
+    try {
+      const response = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
+      
+      if (!response.ok) throw new Error('Erro ao buscar CEP');
+      
+      const data = await response.json();
+      
+      if (data.erro) {
+        setMensagemErro('⚠️ CEP não encontrado');
+        setMensagemTipo('erro');
+        return;
+      }
+
+      if (data.uf) setUf(data.uf);
+      if (data.localidade) setCidade(data.localidade);
+      if (data.bairro) setBairro(data.bairro);
+      if (data.logradouro) setLogradouro(data.logradouro);
+      if (data.cep) {
+        setCep(data.cep.replace(/(\d{5})(\d{3})/, '$1-$2'));
+      }
+
+      if (data.logradouro && data.localidade && data.uf && window.google) {
+        const geocoder = new window.google.maps.Geocoder();
+        const enderecoBusca = `${data.logradouro}, ${data.localidade}, ${data.uf}, Brasil`;
+        
+        geocoder.geocode(
+          { address: enderecoBusca, region: 'br' },
+          (results, status) => {
+            if (status === 'OK' && results && results.length > 0) {
+              const location = results[0].geometry.location;
+              const coords = [location.lat(), location.lng()];
+              setCoordenadasAtuais(coords);
+              setCentroMapa(coords);
+              setZoomMapa(17);
+              
+              if (mapInstance) {
+                mapInstance.panTo(location);
+                mapInstance.setZoom(17);
+              }
+            }
+          }
+        );
+      }
+
+      setMensagem('✅ CEP localizado! Verifique os dados.');
+      setMensagemTipo('sucesso');
+      setTimeout(() => setMensagem(''), 5000);
+      setMensagemErro('');
+    } catch (error) {
+      console.error('Erro ao buscar CEP:', error);
+      setMensagemErro('❌ Erro ao buscar CEP. Tente novamente.');
+      setMensagemTipo('erro');
+    } finally {
+      setBuscandoCep(false);
+    }
+  };
+
+  // ============================================
+  // BUSCAR CIDADES POR UF (IBGE)
+  // ============================================
+  const buscarCidadesPorUF = useCallback(async (siglaUF) => {
+    if (!siglaUF || siglaUF.length !== 2) {
+      setCidadesFiltradas([]);
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${siglaUF}/municipios?orderBy=nome`
+      );
+      
+      if (!response.ok) throw new Error('Erro ao buscar cidades');
+      
+      const data = await response.json();
+      setCidadesFiltradas(data.map(item => item.nome));
+    } catch (error) {
+      console.error('Erro ao buscar cidades:', error);
+      setCidadesFiltradas([]);
+    }
+  }, []);
+
+  // ============================================
+  // CARREGAR DADOS DO BANCO
+  // ============================================
   const carregarDados = async () => {
+    if (!estabelecimentoId) return;
     setCarregando(true);
     try {
-      const docRef = doc(db, "estabelecimentos", estabelecimentoId);
-      const docSnap = await getDoc(docRef);
-      
+      const docSnap = await getDoc(doc(db, 'estabelecimentos', estabelecimentoId));
       if (docSnap.exists()) {
         const data = docSnap.data();
         setNomeEstabelecimento(data.nome || '');
         setTelefone(data.telefone || '');
-        setEmail(data.email || '');
         setUf(data.uf || '');
         setCidade(data.cidade || '');
         setBairro(data.bairro || '');
@@ -283,94 +331,149 @@ export default function MeusDados({ estabelecimentoId, onDadosSalvos }) {
         setNumero(data.numero || '');
         setComplemento(data.complemento || '');
         setCep(data.cep || '');
-        setEnderecoCompleto(data.enderecoCompleto || '');
-        setDadosIniciais(data);
-        
-        if (data.enderecoCompleto) {
-          buscarCoordenadasPorEndereco(data.enderecoCompleto);
+
+        if (data.lat && data.lon) {
+          const coordsSalvas = [data.lat, data.lon];
+          setCoordenadasSalvas(coordsSalvas);
+          setCoordenadasAtuais(coordsSalvas);
+          setZoomMapa(17);
+          setCentroMapa([data.lat, data.lon]);
         }
       }
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
-      setMensagemErro('❌ Erro ao carregar dados do estabelecimento');
-      setMensagemTipo('erro');
     } finally {
       setCarregando(false);
     }
   };
 
   // ============================================
-  // BUSCAR COORDENADAS
+  // EFFECT: Carregar dados iniciais
   // ============================================
-  const buscarCoordenadasPorEndereco = async (endereco) => {
-    if (!endereco || endereco.trim().length < 5) {
-      setCoordenadasMapa(null);
-      return;
+  useEffect(() => {
+    carregarDados();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estabelecimentoId]);
+
+  // ============================================
+  // EFFECT: Buscar cidades quando UF mudar
+  // ============================================
+  useEffect(() => {
+    if (uf && uf.length === 2) {
+      buscarCidadesPorUF(uf);
+    } else {
+      setCidadesFiltradas([]);
+      setCidade('');
+    }
+  }, [uf, buscarCidadesPorUF]);
+
+  // ============================================
+  // EFFECT: Debounce para busca de CEP
+  // ============================================
+  useEffect(() => {
+    if (cepTimeoutRef.current) clearTimeout(cepTimeoutRef.current);
+
+    const cepLimpo = cep.replace(/\D/g, '');
+    if (cepLimpo.length === 8) {
+      cepTimeoutRef.current = setTimeout(() => {
+        buscarCep(cep);
+      }, 500);
     }
 
-    setCarregandoMapa(true);
-    setErroMapa(false);
-    
-    try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(endereco)}&limit=1&countrycodes=BR`,
-        { headers: { 'User-Agent': 'JaVaiApp/1.0' } }
-      );
+    return () => {
+      if (cepTimeoutRef.current) clearTimeout(cepTimeoutRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cep]);
 
-      if (!response.ok) throw new Error('Erro na API');
-
-      const data = await response.json();
-      
-      if (data && data.length > 0) {
-        const lat = parseFloat(data[0].lat);
-        const lon = parseFloat(data[0].lon);
-        setCoordenadasMapa([lat, lon]);
-        setErroMapa(false);
-      } else {
-        setCoordenadasMapa(null);
-        setErroMapa(true);
-      }
-    } catch (error) {
-      console.error('Erro ao buscar coordenadas:', error);
-      setCoordenadasMapa(null);
-      setErroMapa(true);
-    } finally {
-      setCarregandoMapa(false);
-    }
+  // ============================================
+  // HANDLER: Selecionar cidade
+  // ============================================
+  const selecionarCidade = (cidadeSelecionada) => {
+    setCidade(cidadeSelecionada);
+    setMostrarSugestoesCidade(false);
+    setCidadesFiltradas([]);
+    setLogradouro('');
   };
 
   // ============================================
-  // HANDLER: Endereço encontrado
+  // HANDLER: Posição do marcador ajustada
   // ============================================
-  const handleEnderecoEncontrado = (dados) => {
-    setEnderecoCompleto(dados.enderecoCompleto);
-    setCidade(dados.cidade || '');
-    setUf(dados.uf || '');
-    setBairro(dados.bairro || '');
-    setLogradouro(dados.logradouro || '');
-    setNumero(dados.numero || '');
-    setCep(dados.cep || '');
-    setCoordenadasMapa(dados.coords);
-    setErroMapa(false);
-    setMensagem('✅ Endereço localizado! Verifique os dados e clique em Salvar.');
+  const handleMarkerPositionChange = (novaPosicao) => {
+    setCoordenadasAtuais(novaPosicao);
+    setMensagem('📍 Posição ajustada! Clique em Salvar para confirmar.');
+    setMensagemTipo('info');
+    setTimeout(() => setMensagem(''), 3000);
+  };
+
+  // ============================================
+  // HANDLER: Lugar selecionado no SearchBox
+  // ============================================
+  const handlePlaceSelect = (place) => {
+    const coords = [place.lat, place.lng];
+    setCoordenadasAtuais(coords);
+    setZoomMapa(17);
+    setCentroMapa(coords);
+    
+    if (place.formattedAddress) {
+      const partes = place.formattedAddress.split(',');
+      if (partes.length > 0) {
+        const logradouroPart = partes[0].trim();
+        if (logradouroPart && !logradouro) {
+          setLogradouro(logradouroPart);
+        }
+      }
+    }
+    
+    setMensagem('✅ Endereço localizado com precisão!');
     setMensagemTipo('sucesso');
     setTimeout(() => setMensagem(''), 5000);
   };
 
   // ============================================
-  // SALVAR DADOS
+  // HANDLER: Formatação do CEP
+  // ============================================
+  const formatarCep = (valor) => {
+    const numeros = valor.replace(/\D/g, '');
+    if (numeros.length === 0) return '';
+    if (numeros.length <= 5) return numeros;
+    return `${numeros.slice(0, 5)}-${numeros.slice(5, 8)}`;
+  };
+
+  const handleCepChange = (e) => {
+    const valor = e.target.value;
+    const apenasNumeros = valor.replace(/\D/g, '');
+    if (apenasNumeros.length <= 8) {
+      setCep(formatarCep(valor));
+    }
+  };
+
+  // ============================================
+  // HANDLER: Salvar dados
   // ============================================
   const salvarDados = async () => {
-    // Validações
     if (!nomeEstabelecimento.trim()) {
       setMensagemErro('⚠️ Nome do estabelecimento é obrigatório');
-      setMensagemTipo('erro');
       return;
     }
 
-    if (!logradouro.trim() || !numero.trim() || !cidade.trim() || !uf.trim()) {
-      setMensagemErro('⚠️ Preencha todos os campos obrigatórios do endereço');
-      setMensagemTipo('erro');
+    if (!uf || uf.length !== 2) {
+      setMensagemErro('⚠️ Selecione um estado (UF)');
+      return;
+    }
+
+    if (!cidade.trim()) {
+      setMensagemErro('⚠️ Selecione uma cidade');
+      return;
+    }
+
+    if (!logradouro.trim()) {
+      setMensagemErro('⚠️ Informe o logradouro');
+      return;
+    }
+
+    if (!numero.trim()) {
+      setMensagemErro('⚠️ Informe o número');
       return;
     }
 
@@ -384,14 +487,20 @@ export default function MeusDados({ estabelecimentoId, onDadosSalvos }) {
         numero.trim(),
         complemento.trim() ? `- ${complemento.trim()}` : '',
         bairro.trim() ? `, ${bairro.trim()}` : '',
-        `${cidade.trim()} - ${uf.trim().toUpperCase()}`,
-        cep.trim() ? `CEP: ${cep.trim()}` : ''
+        `${cidade.trim()} - ${uf.trim().toUpperCase()}`
       ].filter(Boolean).join(' ');
+
+      let lat = null;
+      let lon = null;
+
+      if (coordenadasAtuais) {
+        lat = coordenadasAtuais[0];
+        lon = coordenadasAtuais[1];
+      }
 
       const dados = {
         nome: nomeEstabelecimento.trim(),
         telefone: telefone.trim(),
-        email: email.trim(),
         uf: uf.trim().toUpperCase(),
         cidade: cidade.trim(),
         bairro: bairro.trim(),
@@ -400,18 +509,25 @@ export default function MeusDados({ estabelecimentoId, onDadosSalvos }) {
         complemento: complemento.trim(),
         cep: cep.trim(),
         enderecoCompleto: enderecoCompletoFormatado,
-        lat: coordenadasMapa ? coordenadasMapa[0] : null,
-        lon: coordenadasMapa ? coordenadasMapa[1] : null,
+        lat: lat,
+        lon: lon,
         atualizadoEm: serverTimestamp()
       };
 
       const docRef = doc(db, "estabelecimentos", estabelecimentoId);
       await setDoc(docRef, dados, { merge: true });
 
+      if (lat && lon) {
+        const coordsSalvas = [lat, lon];
+        setCoordenadasSalvas(coordsSalvas);
+        setCoordenadasAtuais(coordsSalvas);
+        setZoomMapa(17);
+        setCentroMapa([lat, lon]);
+      }
+
       setMensagem('✅ Dados salvos com sucesso!');
       setMensagemTipo('sucesso');
       setMensagemErro('');
-      setEnderecoCompleto(enderecoCompletoFormatado);
 
       if (onDadosSalvos) {
         onDadosSalvos(dados);
@@ -428,67 +544,49 @@ export default function MeusDados({ estabelecimentoId, onDadosSalvos }) {
   };
 
   // ============================================
+  // FORMATAR TELEFONE
+  // ============================================
+  const formatarTelefone = (valor) => {
+    const numeros = valor.replace(/\D/g, '');
+    if (numeros.length === 0) return '';
+    if (numeros.length <= 2) return `(${numeros}`;
+    if (numeros.length <= 3) return `(${numeros.slice(0, 2)}) ${numeros.slice(2)}`;
+    if (numeros.length <= 7) return `(${numeros.slice(0, 2)}) ${numeros.slice(2, 3)} ${numeros.slice(3)}`;
+    if (numeros.length <= 11) return `(${numeros.slice(0, 2)}) ${numeros.slice(2, 3)} ${numeros.slice(3, 7)}-${numeros.slice(7)}`;
+    return `(${numeros.slice(0, 2)}) ${numeros.slice(2, 3)} ${numeros.slice(3, 7)}-${numeros.slice(7, 11)}`;
+  };
+
+  const handleTelefoneChange = (e) => {
+    const valor = e.target.value;
+    const apenasNumeros = valor.replace(/\D/g, '');
+    if (apenasNumeros.length <= 11) {
+      setTelefone(formatarTelefone(valor));
+    }
+  };
+
+  // ============================================
   // RENDER MAPA
   // ============================================
   const renderMapa = () => {
+    const posicaoFinal = coordenadasAtuais || coordenadasSalvas;
+
     return (
-      <div className="mapa-wrapper">
-        <MapContainer
-          center={coordenadasMapa || [-22.0089, -47.8906]}
-          zoom={coordenadasMapa ? 17 : 13}
-          style={{ height: '100%', width: '100%' }}
-        >
-          <LayersControl position="topright">
-            <BaseLayer checked name="Híbrido (Satélite + Ruas)">
-              <MapaHibrido />
-            </BaseLayer>
-            <BaseLayer name="Satélite">
-              <TileLayer
-                attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
-                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              />
-            </BaseLayer>
-            <BaseLayer name="Ruas">
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-            </BaseLayer>
-          </LayersControl>
-
-          <SearchControl 
-            onEnderecoEncontrado={handleEnderecoEncontrado}
-            onCarregando={setCarregandoMapa}
-            onErro={setErroMapa}
-          />
-
-          {coordenadasMapa && (
-            <Marker position={coordenadasMapa}>
-              <Popup>
-                <strong>📍 {nomeEstabelecimento || 'Seu Estabelecimento'}</strong><br />
-                {enderecoCompleto || 'Endereço configurado'}
-              </Popup>
-            </Marker>
-          )}
-
-          {coordenadasMapa && <CenterMap coordenadas={coordenadasMapa} />}
-        </MapContainer>
-
-        <div className="mapa-preview-info">
-          {carregandoMapa ? (
-            <span>⏳ Carregando...</span>
-          ) : coordenadasMapa ? (
-            <>
-              <span>📍 Localização definida</span>
-              <span className="mapa-preview-coords">
-                {coordenadasMapa[0].toFixed(6)}°, {coordenadasMapa[1].toFixed(6)}°
-              </span>
-            </>
-          ) : (
-            <span className="mapa-preview-hint">🔍 Pesquise o endereço no mapa acima</span>
-          )}
-        </div>
-      </div>
+      <LoadScript
+        googleMapsApiKey={GOOGLE_MAPS_API_KEY}
+        libraries={['places']}
+        onLoad={() => setIsScriptLoaded(true)}
+      >
+        <GoogleMapComponent
+          center={posicaoFinal || centroMapa}
+          zoom={posicaoFinal ? 17 : zoomMapa}
+          markerPosition={posicaoFinal}
+          onMarkerDragEnd={handleMarkerPositionChange}
+          onPlaceSelect={handlePlaceSelect}
+          nomeEstabelecimento={nomeEstabelecimento}
+          endereco={`${logradouro}, ${numero} - ${cidade}`}
+          setMapInstance={setMapInstance}
+        />
+      </LoadScript>
     );
   };
 
@@ -509,234 +607,369 @@ export default function MeusDados({ estabelecimentoId, onDadosSalvos }) {
   return (
     <div className="meus-dados-container">
       <div className="meus-dados-header">
-        <h2>⚙️ Meus Dados</h2>
-        <p>Configure os dados do seu estabelecimento. Pesquise o endereço diretamente no mapa.</p>
+        <div className="header-content">
+          <h2>⚙️ Meus Dados</h2>
+          <p>Configure os dados do seu estabelecimento e localização no mapa</p>
+        </div>
+      </div>
+
+      <div className="abas-container">
+        <button 
+          className={`aba-btn ${abaAtiva === 'formulario' ? 'aba-ativa' : ''}`}
+          onClick={() => setAbaAtiva('formulario')}
+        >
+          <span>📋</span> Formulário
+        </button>
+        <button 
+          className={`aba-btn ${abaAtiva === 'mapa' ? 'aba-ativa' : ''}`}
+          onClick={() => setAbaAtiva('mapa')}
+        >
+          <span>🗺️</span> Mapa
+        </button>
       </div>
 
       <div className="meus-dados-form">
-        {/* Informações Básicas */}
-        <div className="form-section">
-          <div className="section-titulo">📋 Informações do Estabelecimento</div>
-          <div className="form-grid">
-            <div className="form-campo-full">
-              <label className="field-label">
-                Nome do Estabelecimento <span className="field-required">*</span>
-              </label>
-              <input
-                type="text"
-                value={nomeEstabelecimento}
-                onChange={(e) => setNomeEstabelecimento(e.target.value)}
-                placeholder="Ex: Restaurante Sabor & Arte"
-                className="field-input"
-              />
+        <div className={`aba-conteudo ${abaAtiva === 'formulario' ? 'aba-visible' : 'aba-hidden'}`}>
+          <div className="form-section">
+            <div className="section-titulo">
+              <span>📋</span> Informações do Estabelecimento
             </div>
+            <div className="form-grid">
+              <div className="form-campo-full">
+                <label className="field-label">
+                  Nome do Estabelecimento <span className="field-required">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={nomeEstabelecimento}
+                  onChange={(e) => setNomeEstabelecimento(e.target.value)}
+                  placeholder="Ex: Tradição Gaúcha Lanches e Pizzas"
+                  className="field-input"
+                />
+              </div>
 
-            <div className="form-campo">
-              <label className="field-label">Telefone / WhatsApp</label>
-              <input
-                type="tel"
-                value={telefone}
-                onChange={(e) => setTelefone(e.target.value)}
-                placeholder="(16) 99999-9999"
-                className="field-input"
-              />
-            </div>
-
-            <div className="form-campo">
-              <label className="field-label">E-mail</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="contato@restaurante.com"
-                className="field-input"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* MAPA */}
-        <div className="form-section mapa-section">
-          <div className="section-titulo">🗺️ Localize seu Estabelecimento</div>
-          <div className="mapa-preview-container">
-            {renderMapa()}
-          </div>
-          <p className="mapa-hint">
-            💡 Digite o endereço na barra de pesquisa do mapa e clique no resultado para preencher automaticamente os campos abaixo.
-          </p>
-        </div>
-
-        {/* Endereço */}
-        <div className="form-section">
-          <div className="section-titulo">📍 Endereço de Coleta</div>
-          <div className="form-grid-endereco">
-            <div className="endereco-campo-uf">
-              <label className="field-label">
-                UF <span className="field-required">*</span>
-              </label>
-              <input
-                type="text"
-                value={uf}
-                onChange={(e) => setUf(e.target.value)}
-                placeholder="SP"
-                className={`field-input ${coordenadasMapa ? 'field-auto' : ''}`}
-                maxLength={2}
-              />
-            </div>
-
-            <div className="endereco-campo-cidade">
-              <label className="field-label">
-                Cidade <span className="field-required">*</span>
-              </label>
-              <input
-                type="text"
-                value={cidade}
-                onChange={(e) => setCidade(e.target.value)}
-                placeholder="São Paulo"
-                className={`field-input ${coordenadasMapa ? 'field-auto' : ''}`}
-              />
-            </div>
-
-            <div className="endereco-campo-bairro">
-              <label className="field-label">Bairro</label>
-              <input
-                type="text"
-                value={bairro}
-                onChange={(e) => setBairro(e.target.value)}
-                placeholder="Centro"
-                className="field-input"
-              />
-            </div>
-
-            <div className="endereco-campo-logradouro">
-              <label className="field-label">
-                Logradouro <span className="field-required">*</span>
-              </label>
-              <input
-                type="text"
-                value={logradouro}
-                onChange={(e) => setLogradouro(e.target.value)}
-                placeholder="Rua, Avenida..."
-                className={`field-input ${coordenadasMapa ? 'field-auto' : ''}`}
-              />
-            </div>
-
-            <div className="endereco-campo-numero">
-              <label className="field-label">
-                Número <span className="field-required">*</span>
-              </label>
-              <input
-                type="text"
-                value={numero}
-                onChange={(e) => setNumero(e.target.value)}
-                placeholder="Nº"
-                className={`field-input ${coordenadasMapa ? 'field-auto' : ''}`}
-              />
-            </div>
-
-            <div className="endereco-campo-complemento">
-              <label className="field-label">Complemento</label>
-              <input
-                type="text"
-                value={complemento}
-                onChange={(e) => setComplemento(e.target.value)}
-                placeholder="Apto, bloco, sala..."
-                className="field-input"
-              />
-            </div>
-
-            <div className="endereco-campo-cep">
-              <label className="field-label">CEP</label>
-              <input
-                type="text"
-                value={cep}
-                onChange={(e) => setCep(e.target.value)}
-                placeholder="00000-000"
-                className="field-input"
-                maxLength={9}
-              />
+              <div className="form-campo">
+                <label className="field-label">Telefone / WhatsApp</label>
+                <input
+                  type="tel"
+                  value={telefone}
+                  onChange={handleTelefoneChange}
+                  placeholder="(00) 0 0000-0000"
+                  className="field-input"
+                  maxLength={16}
+                />
+              </div>
             </div>
           </div>
 
-          {uf && cidade && logradouro && numero && (
-            <div className="endereco-preview">
-              <span className="preview-label">📌 Endereço completo:</span>
-              <span className="preview-endereco">
-                {logradouro}, {numero}
-                {complemento ? ` - ${complemento}` : ''}
-                {bairro ? `, ${bairro}` : ''}
-                , {cidade} - {uf.toUpperCase()}
-                {cep ? `, CEP: ${cep}` : ''}
-              </span>
+          <div className="form-section">
+            <div className="section-titulo">
+              <span>📍</span> Endereço de Coleta
             </div>
-          )}
+            
+            <div className="form-grid-cep">
+              <div className="endereco-campo-cep">
+                <label className="field-label">
+                  CEP <span className="field-hint">(Prioritário para precisão)</span>
+                </label>
+                <div className="cep-input-wrapper">
+                  <input
+                    type="text"
+                    value={cep}
+                    onChange={handleCepChange}
+                    placeholder="00000-000"
+                    className="field-input"
+                    maxLength={9}
+                  />
+                  {buscandoCep && <span className="cep-loading">⏳</span>}
+                </div>
+                <p className="cep-hint">Digite o CEP para preencher automaticamente os campos</p>
+              </div>
+            </div>
+
+            <div className="form-grid-endereco">
+              <div className="endereco-campo-uf">
+                <label className="field-label">
+                  UF <span className="field-required">*</span>
+                </label>
+                <select
+                  value={uf}
+                  onChange={(e) => setUf(e.target.value)}
+                  className="field-input"
+                >
+                  <option value="">Selecione</option>
+                  {ESTADOS_BRASIL.map((sigla) => (
+                    <option key={sigla} value={sigla}>{sigla}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="endereco-campo-cidade">
+                <label className="field-label">
+                  Cidade <span className="field-required">*</span>
+                </label>
+                <div className="autocomplete-wrapper" ref={cidadeResultsRef}>
+                  <input
+                    ref={cidadeInputRef}
+                    type="text"
+                    value={cidade}
+                    onChange={(e) => {
+                      setCidade(e.target.value);
+                      if (e.target.value.length > 0 && cidadesFiltradas.length > 0) {
+                        const filtradas = cidadesFiltradas.filter(c => 
+                          c.toLowerCase().includes(e.target.value.toLowerCase())
+                        );
+                        if (filtradas.length > 0) {
+                          setCidadesFiltradas(filtradas);
+                          setMostrarSugestoesCidade(true);
+                        } else {
+                          setMostrarSugestoesCidade(false);
+                        }
+                      } else {
+                        setMostrarSugestoesCidade(false);
+                      }
+                    }}
+                    onFocus={() => {
+                      if (cidade && cidadesFiltradas.length > 0) {
+                        const filtradas = cidadesFiltradas.filter(c => 
+                          c.toLowerCase().includes(cidade.toLowerCase())
+                        );
+                        if (filtradas.length > 0) {
+                          setCidadesFiltradas(filtradas);
+                          setMostrarSugestoesCidade(true);
+                        }
+                      }
+                    }}
+                    placeholder={uf ? "Digite a cidade..." : "Selecione um estado primeiro"}
+                    className="field-input"
+                    disabled={!uf}
+                  />
+                  {mostrarSugestoesCidade && cidadesFiltradas.length > 0 && (
+                    <div className="autocomplete-results">
+                      {cidadesFiltradas.slice(0, 10).map((cidadeNome) => (
+                        <div
+                          key={cidadeNome}
+                          className="autocomplete-item"
+                          onClick={() => selecionarCidade(cidadeNome)}
+                        >
+                          {cidadeNome}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="endereco-campo-bairro">
+                <label className="field-label">Bairro</label>
+                <input
+                  type="text"
+                  value={bairro}
+                  onChange={(e) => setBairro(e.target.value)}
+                  placeholder="Centro"
+                  className="field-input"
+                />
+              </div>
+
+              <div className="endereco-campo-logradouro">
+                <label className="field-label">
+                  Logradouro <span className="field-required">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={logradouro}
+                  onChange={(e) => setLogradouro(e.target.value)}
+                  placeholder="Rua, Avenida..."
+                  className="field-input"
+                  disabled={!cidade}
+                />
+              </div>
+
+              <div className="endereco-campo-numero">
+                <label className="field-label">
+                  Número <span className="field-required">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={numero}
+                  onChange={(e) => setNumero(e.target.value)}
+                  placeholder="Nº"
+                  className="field-input"
+                />
+              </div>
+
+              <div className="endereco-campo-complemento">
+                <label className="field-label">Complemento</label>
+                <input
+                  type="text"
+                  value={complemento}
+                  onChange={(e) => setComplemento(e.target.value)}
+                  placeholder="Apto, bloco, sala..."
+                  className="field-input"
+                />
+              </div>
+            </div>
+
+            {uf && cidade && logradouro && numero && (
+              <div className="endereco-preview">
+                <span className="preview-label">📌 Endereço completo:</span>
+                <span className="preview-endereco">
+                  {logradouro}, {numero}
+                  {complemento ? ` - ${complemento}` : ''}
+                  {bairro ? `, ${bairro}` : ''}
+                  , {cidade} - {uf.toUpperCase()}
+                  {cep ? `, CEP: ${cep}` : ''}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="form-actions">
+            {mensagem && (
+              <div className={`mensagem mensagem-${mensagemTipo || 'sucesso'}`}>
+                {mensagem}
+              </div>
+            )}
+            {mensagemErro && (
+              <div className="mensagem mensagem-erro">{mensagemErro}</div>
+            )}
+            <button
+              onClick={salvarDados}
+              disabled={salvando}
+              className="btn-salvar-dados"
+            >
+              {salvando ? '⏳ Salvando...' : '💾 Salvar Dados'}
+            </button>
+          </div>
         </div>
 
-        {/* Ações */}
-        <div className="form-actions">
-          {mensagem && (
-            <div className={`mensagem ${mensagemTipo === 'sucesso' ? 'mensagem-sucesso' : 'mensagem-erro'}`}>
-              {mensagem}
+        <div className={`aba-conteudo ${abaAtiva === 'mapa' ? 'aba-visible' : 'aba-hidden'}`}>
+          <div className="form-section mapa-section">
+            <div className="section-titulo">
+              <span>🗺️</span> Localização no Mapa
             </div>
-          )}
-          {mensagemErro && (
-            <div className="mensagem mensagem-erro">{mensagemErro}</div>
-          )}
-          <button
-            onClick={salvarDados}
-            disabled={salvando}
-            className="btn-salvar-dados"
-          >
-            {salvando ? '⏳ Salvando...' : '💾 Salvar Dados'}
-          </button>
+            <div className="mapa-preview-container">
+              {renderMapa()}
+            </div>
+            <p className="mapa-hint">
+              🔍 <strong>Pesquise no mapa</strong> ou preencha o formulário acima.
+              <strong> Arraste o marcador </strong> para ajustar a localização exata.
+            </p>
+          </div>
         </div>
       </div>
 
       <style>{`
         /* ============================================ */
-        /* ESTILOS COMPLETOS MEUS DADOS                */
+        /* ESTILOS - FONTES OTIMIZADAS ZOOM 100%        */
         /* ============================================ */
         
         .meus-dados-container {
-          padding: 30px;
-          max-width: 950px;
+          padding: 24px;
+          max-width: 1100px;
           margin: 0 auto;
           width: 100%;
           box-sizing: border-box;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
+        /* HEADER */
         .meus-dados-header {
-          margin-bottom: 30px;
+          margin-bottom: 20px;
+          padding: 18px 24px;
+          background: #f8f9fa;
+          border-radius: 12px;
+          border: 1px solid #e9ecef;
         }
 
         .meus-dados-header h2 {
-          font-size: 28px;
-          font-weight: 700;
-          color: #212121;
-          margin: 0 0 8px 0;
+          font-size: 20px;
+          font-weight: 600;
+          color: #1a1a2e;
+          margin: 0 0 4px 0;
         }
 
         .meus-dados-header p {
-          color: #757575;
-          font-size: 15px;
+          color: #6b7280;
+          font-size: 13px;
           margin: 0;
         }
 
+        /* ABAS */
+        .abas-container {
+          display: flex;
+          gap: 4px;
+          background: #f1f3f5;
+          border-radius: 10px;
+          padding: 4px;
+          margin-bottom: 20px;
+          border: 1px solid #e9ecef;
+        }
+
+        .aba-btn {
+          flex: 1;
+          padding: 8px 16px;
+          border: none;
+          border-radius: 8px;
+          font-size: 13px;
+          font-weight: 500;
+          color: #6b7280;
+          background: transparent;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+        }
+
+        .aba-btn:hover {
+          color: #1a1a2e;
+          background: rgba(229, 57, 53, 0.05);
+        }
+
+        .aba-btn.aba-ativa {
+          background: #ffffff;
+          color: #E53935;
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+        }
+
+        .aba-btn span {
+          font-size: 16px;
+        }
+
+        .aba-conteudo {
+          transition: all 0.3s ease;
+        }
+
+        .aba-visible {
+          display: block;
+          animation: fadeIn 0.25s ease;
+        }
+
+        .aba-hidden {
+          display: none;
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* FORMULÁRIO */
         .meus-dados-form {
-          background: rgba(255, 255, 255, 0.85);
-          backdrop-filter: blur(15px);
-          -webkit-backdrop-filter: blur(15px);
-          border-radius: 16px;
-          border: 1px solid rgba(255, 255, 255, 0.3);
-          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
-          padding: 30px;
+          background: #ffffff;
+          border-radius: 12px;
+          border: 1px solid #e9ecef;
+          box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+          padding: 24px;
           box-sizing: border-box;
         }
 
         .form-section {
-          margin-bottom: 28px;
-          padding-bottom: 28px;
-          border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+          margin-bottom: 24px;
+          padding-bottom: 24px;
+          border-bottom: 1px solid #e9ecef;
         }
 
         .form-section:last-child {
@@ -747,49 +980,64 @@ export default function MeusDados({ estabelecimentoId, onDadosSalvos }) {
 
         .section-titulo {
           font-weight: 600;
+          font-size: 13px;
+          color: #1a1a2e;
+          margin-bottom: 14px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .section-titulo span {
           font-size: 16px;
-          color: #757575;
-          margin-bottom: 16px;
-          letter-spacing: 0.5px;
-          text-transform: uppercase;
         }
 
         .form-grid {
           display: grid;
-          gap: 16px 20px;
+          gap: 12px 16px;
           grid-template-columns: 1fr 1fr;
+        }
+
+        .form-grid-cep {
+          display: grid;
+          gap: 10px 16px;
+          grid-template-columns: 1fr;
+          margin-bottom: 12px;
         }
 
         .form-grid-endereco {
           display: grid;
-          gap: 12px 16px;
+          gap: 10px 14px;
           grid-template-columns: repeat(6, 1fr);
         }
 
         .form-campo {
           display: flex;
           flex-direction: column;
-          gap: 4px;
+          gap: 3px;
         }
 
         .form-campo-full {
           grid-column: span 2;
         }
 
+        .endereco-campo-cep { 
+          grid-column: span 1;
+          max-width: 280px;
+        }
         .endereco-campo-uf { grid-column: span 1; }
         .endereco-campo-cidade { grid-column: span 2; }
         .endereco-campo-bairro { grid-column: span 1; }
         .endereco-campo-logradouro { grid-column: span 3; }
         .endereco-campo-numero { grid-column: span 1; }
         .endereco-campo-complemento { grid-column: span 1; }
-        .endereco-campo-cep { grid-column: span 1; }
 
         .field-label {
           display: block;
           font-weight: 600;
-          margin-bottom: 4px;
-          font-size: 13px;
-          color: #424242;
+          margin-bottom: 3px;
+          font-size: 12px;
+          color: #374151;
         }
 
         .field-required {
@@ -797,70 +1045,162 @@ export default function MeusDados({ estabelecimentoId, onDadosSalvos }) {
           font-weight: 700;
         }
 
+        .field-hint {
+          font-weight: 400;
+          font-size: 10.5px;
+          color: #9CA3AF;
+          margin-left: 4px;
+        }
+
         .field-input {
           width: 100%;
-          padding: 10px 14px;
-          border-radius: 10px;
-          border: 2px solid rgba(229, 57, 53, 0.15);
-          font-size: 15px;
-          transition: all 0.3s ease;
-          background: rgba(255, 255, 255, 0.7);
-          color: #212121;
+          padding: 8px 12px;
+          border-radius: 8px;
+          border: 1.5px solid #e9ecef;
+          font-size: 13px;
+          transition: all 0.2s ease;
+          background: #fafbfc;
+          color: #1a1a2e;
           outline: none;
           box-sizing: border-box;
+          font-family: inherit;
+          height: 38px;
         }
 
         .field-input:focus {
           border-color: #E53935;
-          background: #FFFFFF;
-          box-shadow: 0 0 0 4px rgba(229, 57, 53, 0.08);
+          background: #ffffff;
+          box-shadow: 0 0 0 3px rgba(229, 57, 53, 0.08);
         }
 
-        .field-input.field-auto {
-          background: rgba(229, 57, 53, 0.04);
-          border-color: rgba(229, 57, 53, 0.08);
+        .field-input:disabled {
+          background: #f1f3f5;
+          color: #9CA3AF;
+          cursor: not-allowed;
         }
 
-        .field-input.field-auto:focus {
-          background: #FFFFFF;
+        .field-input select {
+          appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 12px center;
+          padding-right: 32px;
         }
 
-        /* Preview Endereço */
-        .endereco-preview {
-          margin-top: 16px;
-          padding: 12px 16px;
+        .cep-input-wrapper {
+          position: relative;
+          display: flex;
+          align-items: center;
+        }
+
+        .cep-input-wrapper .field-input {
+          padding-right: 36px;
+        }
+
+        .cep-loading {
+          position: absolute;
+          right: 10px;
+          animation: spin 1s linear infinite;
+          color: #E53935;
+          font-size: 14px;
+        }
+
+        .cep-hint {
+          font-size: 11px;
+          color: #9CA3AF;
+          margin: 3px 0 0 0;
+        }
+
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+
+        /* AUTOCOMPLETE */
+        .autocomplete-wrapper {
+          position: relative;
+          width: 100%;
+        }
+
+        .autocomplete-results {
+          position: absolute;
+          top: calc(100% + 3px);
+          left: 0;
+          right: 0;
+          max-height: 180px;
+          overflow-y: auto;
+          background: #ffffff;
+          border-radius: 8px;
+          border: 1px solid #e9ecef;
+          box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+          z-index: 1000;
+          padding: 4px 0;
+        }
+
+        .autocomplete-item {
+          padding: 8px 14px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          border-bottom: 1px solid #f1f3f5;
+          font-size: 13px;
+          color: #1a1a2e;
+        }
+
+        .autocomplete-item:last-child {
+          border-bottom: none;
+        }
+
+        .autocomplete-item:hover {
           background: rgba(229, 57, 53, 0.05);
-          border-radius: 10px;
-          border-left: 4px solid #E53935;
+          color: #E53935;
+        }
+
+        .autocomplete-results::-webkit-scrollbar {
+          width: 5px;
+        }
+        .autocomplete-results::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .autocomplete-results::-webkit-scrollbar-thumb {
+          background: #d1d5db;
+          border-radius: 3px;
+        }
+
+        /* PREVIEW ENDEREÇO */
+        .endereco-preview {
+          margin-top: 12px;
+          padding: 10px 14px;
+          background: #fef2f2;
+          border-radius: 8px;
+          border-left: 3px solid #E53935;
           display: flex;
           flex-wrap: wrap;
-          gap: 8px;
+          gap: 6px;
           align-items: center;
         }
 
         .preview-label {
           font-weight: 600;
-          font-size: 14px;
-          color: #424242;
+          font-size: 12px;
+          color: #374151;
         }
 
         .preview-endereco {
-          font-size: 14px;
-          color: #212121;
+          font-size: 13px;
+          color: #1a1a2e;
           font-weight: 500;
         }
 
         /* MAPA */
         .mapa-section {
-          padding-bottom: 20px;
+          padding-bottom: 16px;
         }
 
         .mapa-preview-container {
           height: 420px;
-          border-radius: 12px;
+          border-radius: 10px;
           overflow: hidden;
-          border: 1px solid rgba(255, 255, 255, 0.3);
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+          border: 1px solid #e9ecef;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
           background: #f0ebe6;
           position: relative;
         }
@@ -871,309 +1211,222 @@ export default function MeusDados({ estabelecimentoId, onDadosSalvos }) {
           position: relative;
         }
 
-        .leaflet-container {
-          height: 100% !important;
-          width: 100% !important;
-        }
-
-        /* Barra de Pesquisa */
-        .search-control-container {
+        /* SEARCH BOX */
+        .search-box-container {
           position: absolute;
-          top: 12px;
+          top: 10px;
           left: 50%;
           transform: translateX(-50%);
-          z-index: 1000;
-          width: 90%;
-          max-width: 500px;
-        }
-
-        .search-input-wrapper {
+          z-index: 10;
           display: flex;
           align-items: center;
-          background: rgba(255, 255, 255, 0.95);
-          backdrop-filter: blur(20px);
-          border-radius: 12px;
-          border: 1px solid rgba(255, 255, 255, 0.3);
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
-          padding: 0 12px;
-          transition: all 0.3s ease;
+          background: white;
+          border-radius: 20px;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+          max-width: 360px;
+          width: 90%;
+          height: 38px;
+          transition: box-shadow 0.2s;
         }
 
-        .search-input-wrapper:focus-within {
-          box-shadow: 0 4px 20px rgba(229, 57, 53, 0.15);
-          border-color: #E53935;
+        .search-box-container:hover,
+        .search-box-container:focus-within {
+          box-shadow: 0 4px 12px rgba(0,0,0,0.25);
         }
 
-        .search-icon {
-          font-size: 16px;
-          color: #9E9E9E;
-          margin-right: 8px;
-        }
-
-        .search-input {
+        .search-box-input {
           flex: 1;
-          padding: 12px 8px;
           border: none;
           outline: none;
-          font-size: 15px;
+          padding: 0 12px;
+          font-size: 13px;
+          font-family: 'Roboto', Arial, sans-serif;
+          color: #202124;
           background: transparent;
-          color: #212121;
-          font-weight: 500;
-        }
-
-        .search-input::placeholder {
-          color: #BDBDBD;
-          font-weight: 400;
-        }
-
-        .search-loading {
-          font-size: 16px;
-          animation: spin 1s linear infinite;
-          color: #E53935;
-        }
-
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-
-        .search-results {
-          position: absolute;
-          top: calc(100% + 8px);
-          left: 0;
-          right: 0;
-          max-height: 280px;
-          overflow-y: auto;
-          background: rgba(255, 255, 255, 0.98);
-          backdrop-filter: blur(20px);
-          border-radius: 12px;
-          border: 1px solid rgba(255, 255, 255, 0.3);
-          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-          padding: 4px 0;
-        }
-
-        .search-result-item {
-          padding: 12px 16px;
-          cursor: pointer;
-          transition: all 0.2s ease;
-          border-bottom: 1px solid rgba(0, 0, 0, 0.04);
-        }
-
-        .search-result-item:last-child {
-          border-bottom: none;
-        }
-
-        .search-result-item:hover {
-          background: rgba(229, 57, 53, 0.05);
-        }
-
-        .search-result-main {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .search-result-icon {
-          font-size: 16px;
-        }
-
-        .search-result-nome {
-          font-weight: 600;
-          color: #212121;
-          font-size: 14px;
-        }
-
-        .search-result-detalhe {
-          font-size: 12px;
-          color: #757575;
-          margin-top: 2px;
-          padding-left: 26px;
-        }
-
-        .search-result-empty {
-          padding: 24px 16px;
-          text-align: center;
-        }
-
-        .search-result-empty span {
-          font-size: 32px;
-          display: block;
-          margin-bottom: 8px;
-        }
-
-        .search-result-empty p {
-          color: #757575;
-          font-size: 14px;
-          margin: 4px 0;
-        }
-
-        .search-result-hint {
-          font-size: 12px !important;
-          color: #9E9E9E !important;
-        }
-
-        .search-results::-webkit-scrollbar {
-          width: 6px;
-        }
-        .search-results::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .search-results::-webkit-scrollbar-thumb {
-          background: #BDBDBD;
-          border-radius: 3px;
-        }
-
-        /* Info do Mapa */
-        .mapa-preview-info {
-          position: absolute;
-          bottom: 12px;
-          left: 50%;
-          transform: translateX(-50%);
-          background: rgba(0, 0, 0, 0.7);
-          backdrop-filter: blur(10px);
-          color: #fff;
-          padding: 6px 16px;
+          height: 100%;
           border-radius: 20px;
-          font-size: 12px;
+        }
+
+        .search-box-input::placeholder {
+          color: #5f6368;
+          font-size: 13px;
+        }
+
+        .search-box-button {
+          background: transparent;
+          border: none;
+          padding: 0 12px;
+          cursor: pointer;
           display: flex;
-          gap: 12px;
           align-items: center;
-          white-space: nowrap;
-          z-index: 1000;
+          justify-content: center;
+          height: 100%;
+          border-radius: 0 20px 20px 0;
         }
 
-        .mapa-preview-coords {
-          color: #FBC02D;
-          font-weight: 500;
+        .search-box-button:hover {
+          background: #f1f3f4;
         }
 
-        .mapa-preview-hint {
-          color: #BDBDBD;
+        /* INFO WINDOW */
+        .info-window-content {
+          padding: 2px 0;
+          font-family: 'Roboto', Arial, sans-serif;
         }
 
-        .leaflet-control-layers {
-          background: rgba(255, 255, 255, 0.9) !important;
-          backdrop-filter: blur(10px);
-          border-radius: 8px !important;
-          border: 1px solid rgba(255, 255, 255, 0.3) !important;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
-        }
-
-        .leaflet-control-layers label {
+        .info-window-title {
           font-size: 13px;
           font-weight: 500;
-          color: #424242;
+          color: #202124;
+          margin-bottom: 2px;
         }
 
-        .leaflet-control-layers input[type="radio"] {
-          accent-color: #E53935;
+        .info-window-address {
+          font-size: 11px;
+          color: #5f6368;
+          margin-bottom: 3px;
+        }
+
+        .info-window-hint {
+          font-size: 10.5px;
+          color: #1a73e8;
+          margin-top: 3px;
         }
 
         .mapa-hint {
           margin-top: 10px;
-          font-size: 13px;
-          color: #9E9E9E;
+          font-size: 12px;
+          color: #6b7280;
           text-align: center;
+          line-height: 1.5;
         }
 
-        /* Ações */
+        .mapa-hint strong {
+          color: #E53935;
+        }
+
+        /* AÇÕES */
         .form-actions {
-          margin-top: 24px;
+          margin-top: 20px;
           display: flex;
           flex-direction: column;
-          gap: 12px;
+          gap: 10px;
         }
 
         .mensagem {
-          padding: 12px 16px;
+          padding: 10px 14px;
           border-radius: 8px;
           font-weight: 500;
-          font-size: 14px;
+          font-size: 13px;
         }
 
         .mensagem-sucesso {
-          background: rgba(46, 125, 50, 0.08);
-          border-left: 4px solid #2E7D32;
-          color: #1B5E20;
+          background: #ecfdf5;
+          border-left: 3px solid #059669;
+          color: #065f46;
         }
 
         .mensagem-erro {
-          background: rgba(229, 57, 53, 0.08);
-          border-left: 4px solid #E53935;
-          color: #C62828;
+          background: #fef2f2;
+          border-left: 3px solid #dc2626;
+          color: #991b1b;
+        }
+
+        .mensagem-info {
+          background: #eff6ff;
+          border-left: 3px solid #2563eb;
+          color: #1e40af;
         }
 
         .btn-salvar-dados {
-          padding: 14px 32px;
-          background: linear-gradient(135deg, #E53935, #C62828);
+          padding: 10px 28px;
+          background: linear-gradient(135deg, #E53935, #c62828);
           color: #fff;
           border: none;
-          border-radius: 12px;
-          font-size: 16px;
+          border-radius: 10px;
+          font-size: 14px;
           font-weight: 600;
           cursor: pointer;
           transition: all 0.3s ease;
-          box-shadow: 0 4px 16px rgba(229, 57, 53, 0.25);
+          box-shadow: 0 3px 12px rgba(229, 57, 53, 0.25);
           align-self: flex-start;
+          font-family: inherit;
+          height: 42px;
         }
 
         .btn-salvar-dados:hover:not(:disabled) {
-          transform: translateY(-2px);
-          box-shadow: 0 8px 28px rgba(229, 57, 53, 0.35);
+          transform: translateY(-1px);
+          box-shadow: 0 6px 20px rgba(229, 57, 53, 0.35);
         }
 
         .btn-salvar-dados:disabled {
-          background: #BDBDBD;
+          background: #9CA3AF;
           box-shadow: none;
           cursor: not-allowed;
           opacity: 0.7;
         }
 
-        /* Loading */
+        /* LOADING */
         .loading-spinner {
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          padding: 60px 20px;
-          gap: 16px;
+          padding: 50px 20px;
+          gap: 14px;
         }
 
         .spinner {
-          width: 48px;
-          height: 48px;
-          border: 4px solid rgba(229, 57, 53, 0.1);
+          width: 40px;
+          height: 40px;
+          border: 3px solid rgba(229, 57, 53, 0.1);
           border-top-color: #E53935;
           border-radius: 50%;
           animation: spin 0.8s linear infinite;
         }
 
         .loading-spinner p {
-          color: #757575;
-          font-size: 15px;
+          color: #6b7280;
+          font-size: 13px;
           margin: 0;
         }
 
-        /* Responsivo */
+        /* ============================================ */
+        /* RESPONSIVIDADE                               */
+        /* ============================================ */
+
         @media (max-width: 1024px) {
           .form-grid-endereco {
             grid-template-columns: repeat(4, 1fr);
           }
+          .endereco-campo-cep { grid-column: span 2; max-width: none; }
           .endereco-campo-uf { grid-column: span 1; }
           .endereco-campo-cidade { grid-column: span 3; }
           .endereco-campo-bairro { grid-column: span 2; }
           .endereco-campo-logradouro { grid-column: span 2; }
           .endereco-campo-numero { grid-column: span 1; }
           .endereco-campo-complemento { grid-column: span 2; }
-          .endereco-campo-cep { grid-column: span 2; }
         }
 
         @media (max-width: 768px) {
           .meus-dados-container {
-            padding: 16px;
+            padding: 12px;
+          }
+
+          .meus-dados-header {
+            padding: 14px 16px;
+          }
+
+          .meus-dados-header h2 {
+            font-size: 18px;
+          }
+
+          .meus-dados-header p {
+            font-size: 12px;
           }
 
           .meus-dados-form {
-            padding: 20px;
+            padding: 16px;
           }
 
           .form-grid {
@@ -1187,14 +1440,15 @@ export default function MeusDados({ estabelecimentoId, onDadosSalvos }) {
           .form-grid-endereco {
             grid-template-columns: 1fr;
           }
+          .endereco-campo-cep,
           .endereco-campo-uf,
           .endereco-campo-cidade,
           .endereco-campo-bairro,
           .endereco-campo-logradouro,
           .endereco-campo-numero,
-          .endereco-campo-complemento,
-          .endereco-campo-cep {
+          .endereco-campo-complemento {
             grid-column: span 1;
+            max-width: none;
           }
 
           .btn-salvar-dados {
@@ -1208,60 +1462,86 @@ export default function MeusDados({ estabelecimentoId, onDadosSalvos }) {
           }
 
           .mapa-preview-container {
-            height: 350px;
+            height: 320px;
           }
 
-          .mapa-preview-info {
-            font-size: 10px;
-            padding: 4px 12px;
-            white-space: normal;
-            flex-wrap: wrap;
-            justify-content: center;
-            bottom: 8px;
+          .search-box-container {
+            max-width: 180px;
+            height: 34px;
+            top: 8px;
           }
 
-          .search-control-container {
-            width: 95%;
-            max-width: none;
-          }
-
-          .search-input {
-            font-size: 14px;
-            padding: 10px 6px;
-          }
-
-          .search-results {
-            max-height: 200px;
+          .search-box-input {
+            font-size: 12px;
           }
         }
 
         @media (max-width: 480px) {
+          .meus-dados-container {
+            padding: 8px;
+          }
+
+          .meus-dados-header {
+            padding: 12px 14px;
+          }
+
           .meus-dados-header h2 {
-            font-size: 22px;
+            font-size: 16px;
+          }
+
+          .meus-dados-header p {
+            font-size: 11px;
           }
 
           .meus-dados-form {
-            padding: 16px;
+            padding: 12px;
           }
 
           .field-input {
-            font-size: 14px;
-            padding: 10px 12px;
+            font-size: 13px;
+            padding: 7px 10px;
+            height: 36px;
           }
 
           .mapa-preview-container {
-            height: 300px;
+            height: 260px;
           }
 
-          .search-input {
+          .search-box-container {
+            max-width: 140px;
+            height: 30px;
+            top: 6px;
+          }
+
+          .search-box-input {
+            font-size: 11px;
+            padding: 0 8px;
+          }
+
+          .search-box-button {
+            padding: 0 8px;
+          }
+
+          .aba-btn {
+            font-size: 12px;
+            padding: 7px 10px;
+          }
+
+          .aba-btn span {
+            font-size: 14px;
+          }
+
+          .section-titulo {
+            font-size: 12px;
+          }
+
+          .btn-salvar-dados {
             font-size: 13px;
+            padding: 8px 20px;
+            height: 38px;
           }
 
-          .search-result-nome {
-            font-size: 13px;
-          }
-
-          .search-result-detalhe {
+          .field-label {
             font-size: 11px;
           }
         }

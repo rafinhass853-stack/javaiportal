@@ -1,7 +1,7 @@
 // ============================================
-// CHAMAR.JSX - VERSÃO MELHORADA
+// CHAMAR.JSX - VERSÃO TELA CHEIA
 // ============================================
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import MapaRota from './MapaRota';
 import { criarPedido, db } from './firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -22,7 +22,6 @@ const EntregaItem = ({
   const [erros, setErros] = useState({});
 
   const handleChange = (campo, valor) => {
-    // Limpa erro do campo
     if (erros[campo]) {
       setErros(prev => ({ ...prev, [campo]: false }));
     }
@@ -33,23 +32,7 @@ const EntregaItem = ({
     if (!disabled) setExpandido(!expandido);
   };
 
-  // Validação para exibir erros
-  const validarCampo = (campo) => {
-    if (!entrega[campo]?.trim()) {
-      setErros(prev => ({ ...prev, [campo]: true }));
-      return false;
-    }
-    return true;
-  };
-
-  const temErros = () => {
-    const campos = ['cliente', 'enderecoEntrega'];
-    let hasError = false;
-    campos.forEach(campo => {
-      if (!validarCampo(campo)) hasError = true;
-    });
-    return hasError;
-  };
+  const temErros = () => ['cliente', 'enderecoEntrega'].some((campo) => !entrega[campo]?.trim());
 
   return (
     <div className={`entrega-item ${expandido ? 'expanded' : ''} ${temErros() ? 'has-error' : ''}`}>
@@ -210,17 +193,12 @@ export default function Chamar({ estabelecimentoId, estabelecimentoNome, restaur
   const [pedidoEnviado, setPedidoEnviado] = useState(false);
   const [erroEnvio, setErroEnvio] = useState('');
   const [pedidoId, setPedidoId] = useState(null);
+  const [ultimaQuantidadeEnviada, setUltimaQuantidadeEnviada] = useState(0);
 
   // ============================================
   // CARREGAR DADOS DO ESTABELECIMENTO
   // ============================================
-  useEffect(() => {
-    if (estabelecimentoId) {
-      carregarDadosEstabelecimento();
-    }
-  }, [estabelecimentoId]);
-
-  const carregarDadosEstabelecimento = async () => {
+  const carregarDadosEstabelecimento = useCallback(async () => {
     setCarregandoColeta(true);
     try {
       const docRef = doc(db, "estabelecimentos", estabelecimentoId);
@@ -247,7 +225,12 @@ export default function Chamar({ estabelecimentoId, estabelecimentoNome, restaur
     } finally {
       setCarregandoColeta(false);
     }
-  };
+  }, [estabelecimentoId, estabelecimentoNome]);
+
+  useEffect(() => {
+    if (estabelecimentoId) carregarDadosEstabelecimento();
+    else setDadosColeta(null);
+  }, [carregarDadosEstabelecimento, estabelecimentoId]);
 
   // ============================================
   // HANDLERS DE ENTREGAS
@@ -294,33 +277,31 @@ export default function Chamar({ estabelecimentoId, estabelecimentoNome, restaur
   // ============================================
   // VALOR CALCULADO
   // ============================================
-  const handleValorCalculado = (valorCalculado, dist) => {
-    setValorTotal(valorCalculado);
+  const handleValorCalculado = useCallback((valorCalculado, dist, distancias = []) => {
+    setValorTotal(valorCalculado || 10);
     setDistanciaTotal(dist || 0);
-    
-    if (dist > 0 && entregas.length > 0) {
-      const distPorEntrega = dist / entregas.length;
-      setEntregas(prev => 
-        prev.map(entrega => ({
-          ...entrega,
-          distanciaKm: distPorEntrega
-        }))
-      );
+
+    if (dist > 0) {
+      const distanciaPorId = new Map(distancias.filter((item) => item?.id).map((item) => [item.id, item.distanciaKm || 0]));
+      setEntregas((prev) => prev.map((entrega) => ({
+        ...entrega,
+        distanciaKm: distanciaPorId.get(entrega.id) ?? (dist / prev.length),
+      })));
     }
-  };
+  }, []);
 
   // ============================================
   // VALIDAR ENTREGAS
   // ============================================
   const validarEntregas = () => {
-    for (let i = 0; i < entregas.length; i++) {
-      const e = entregas[i];
-      if (!e.cliente?.trim()) {
-        alert(`⚠️ Informe o nome do cliente para entrega #${i + 1}`);
+    for (let i = 0; i < entregas.length; i += 1) {
+      const entrega = entregas[i];
+      if (!entrega.cliente?.trim()) {
+        setErroEnvio(`Informe o nome do cliente na entrega #${i + 1}.`);
         return false;
       }
-      if (!e.enderecoEntrega?.trim()) {
-        alert(`⚠️ Informe o endereço de entrega #${i + 1}`);
+      if (!entrega.enderecoEntrega?.trim()) {
+        setErroEnvio(`Informe o endereço de entrega #${i + 1}.`);
         return false;
       }
     }
@@ -332,14 +313,14 @@ export default function Chamar({ estabelecimentoId, estabelecimentoNome, restaur
   // ============================================
   const enviarPedido = async () => {
     if (!dadosColeta || !dadosColeta.enderecoCompleto) {
-      alert('⚠️ Configure os dados do estabelecimento em "Meus Dados" primeiro');
+      setErroEnvio('Configure o endereço de coleta em “Meus Dados” antes de criar uma rota.');
       return;
     }
 
     if (!validarEntregas()) return;
 
     if (distanciaTotal === 0) {
-      alert('⚠️ Aguarde o cálculo da rota antes de enviar');
+      setErroEnvio('Aguarde o cálculo da rota antes de enviar.');
       return;
     }
 
@@ -374,8 +355,10 @@ export default function Chamar({ estabelecimentoId, estabelecimentoNome, restaur
         urlAcesso: restauranteSlug ? `https://javaiportal.web.app/${restauranteSlug}` : null
       };
 
+      const quantidadeEnviada = entregas.length;
       const id = await criarPedido(pedido);
       setPedidoId(id);
+      setUltimaQuantidadeEnviada(quantidadeEnviada);
       setPedidoEnviado(true);
       setErroEnvio('');
       
@@ -580,7 +563,7 @@ export default function Chamar({ estabelecimentoId, estabelecimentoNome, restaur
           <div>
             <span className="toast-title">Rota enviada com sucesso!</span>
             <span className="toast-detail">
-              {entregas.length} entrega{entregas.length > 1 ? 's' : ''} cadastrada{entregas.length > 1 ? 's' : ''}
+              {ultimaQuantidadeEnviada} entrega{ultimaQuantidadeEnviada > 1 ? 's' : ''} cadastrada{ultimaQuantidadeEnviada > 1 ? 's' : ''}
               {pedidoId && ` • ID: ${pedidoId.slice(0, 8)}`}
             </span>
           </div>
@@ -597,16 +580,16 @@ export default function Chamar({ estabelecimentoId, estabelecimentoNome, restaur
 
       <style>{`
         /* ============================================ */
-        /* CHAMAR - ESTILOS MELHORADOS                 */
+        /* CHAMAR - TELA CHEIA                        */
         /* ============================================ */
         
         .chamar-container {
-          padding: 24px;
-          max-width: 1100px;
-          margin: 0 auto;
+          padding: 24px 32px;
           width: 100%;
+          max-width: 100%;
           box-sizing: border-box;
           padding-bottom: 120px;
+          margin: 0;
         }
 
         /* Loading */
@@ -1030,6 +1013,7 @@ export default function Chamar({ estabelecimentoId, estabelecimentoNome, restaur
           border: 1px solid rgba(255, 255, 255, 0.3);
           overflow: hidden;
           position: relative;
+          width: 100%;
         }
 
         .mapa-aviso-multiplas {
@@ -1052,8 +1036,8 @@ export default function Chamar({ estabelecimentoId, estabelecimentoNome, restaur
           bottom: 20px;
           left: 50%;
           transform: translateX(-50%);
-          max-width: 1040px;
-          width: calc(100% - 60px);
+          max-width: 1100px;
+          width: calc(100% - 64px);
           padding: 16px 24px;
           display: flex;
           justify-content: space-between;
@@ -1193,8 +1177,11 @@ export default function Chamar({ estabelecimentoId, estabelecimentoNome, restaur
 
         /* Responsivo */
         @media (max-width: 1024px) {
+          .chamar-container {
+            padding: 20px 24px;
+          }
           .resumo-bar-fixed {
-            width: calc(100% - 40px);
+            width: calc(100% - 48px);
           }
         }
 
