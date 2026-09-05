@@ -5,6 +5,16 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   server: {
-    open: true // Abre o navegador automaticamente ao iniciar o servidor
-  }
+    open: true,
+    port: 5173,
+    host: true,
+  },
+  build: {
+    sourcemap: false,
+    chunkSizeWarningLimit: 1000,
+  },
+  // Garante que imagens do Leaflet sejam resolvidas corretamente
+  optimizeDeps: {
+    include: ['leaflet', 'leaflet-routing-machine'],
+  },
 })
