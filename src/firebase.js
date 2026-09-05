@@ -19,7 +19,8 @@ import {
   updateDoc,
   deleteDoc,
   getDoc,
-  setDoc
+  setDoc,
+  writeBatch
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -33,10 +34,20 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+
+// Analytics só no browser (evita erros em ambientes sem window)
+let analytics = null;
+if (typeof window !== "undefined") {
+  try {
+    analytics = getAnalytics(app);
+  } catch (e) {
+    console.warn("Analytics não inicializado:", e.message);
+  }
+}
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export { analytics };
 
 // Exporta funções de autenticação
 export { signInWithEmailAndPassword, onAuthStateChanged };
@@ -254,8 +265,8 @@ export async function definirEnderecoPadrao(estabelecimentoId, enderecoId) {
     // Busca todos os endereços
     const enderecos = await buscarEnderecosEstabelecimento(estabelecimentoId);
     
-    // Remove o padrão de todos
-    const batch = db.batch();
+    // Remove o padrão de todos e define o novo em uma única operação atômica
+    const batch = writeBatch(db);
     
     for (const endereco of enderecos) {
       const docRef = doc(db, "estabelecimentos", estabelecimentoId, "enderecos", endereco.id);
